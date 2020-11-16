@@ -5,8 +5,8 @@ see fit.
 
 ## Building, running, and testing
 
-This project compiles with `stack build`. You can add any needed dependencies to
-[stack.yaml](stack.yaml).
+This project compiles with `stack build`. You can add any needed dependencies
+and update project metadata in [package.yaml](package.yaml).
 
 You can run the main executable with `stack run`. The entry point for the
 executable is in [Main.hs](app/Main.hs). It imports [Lib.hs](src/Lib.hs),
