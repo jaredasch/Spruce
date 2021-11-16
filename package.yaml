@@ -20,15 +20,33 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/githubuser/project-cis552#readme>
 
 dependencies:
-- base >=4.13 && <4.14
+- base >= 4.14
 - HUnit >= 1.6
-- QuickCheck == 2.13.2
+- QuickCheck >= 2.14.2
 - containers == 0.6.2.1
 - mtl
 
 
 library:
   source-dirs: src
+  default-extensions:
+  - ScopedTypeVariables
+  - TypeApplications
+  - InstanceSigs
+  - KindSignatures
+  - LambdaCase
+  - DeriveFunctor
+  - DeriveFoldable
+  - DeriveTraversable
+  - GeneralizedNewtypeDeriving
+  - TupleSections
+  - MultiParamTypeClasses
+  - FlexibleInstances
+  - FlexibleContexts
+  - UndecidableInstances
+  - NoMonomorphismRestriction
+  - NoStarIsType
+
 
 executables:
   project-cis552-exe:
@@ -40,6 +58,24 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - project-cis552
+    default-extensions:
+    - ScopedTypeVariables
+    - TypeApplications
+    - InstanceSigs
+    - KindSignatures
+    - LambdaCase
+    - DeriveFunctor
+    - DeriveFoldable
+    - DeriveTraversable
+    - GeneralizedNewtypeDeriving
+    - TupleSections
+    - MultiParamTypeClasses
+    - FlexibleInstances
+    - FlexibleContexts
+    - UndecidableInstances
+    - NoMonomorphismRestriction
+    - NoStarIsType
+
 
 tests:
   project-cis552-test:
@@ -51,3 +87,20 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - project-cis552
+    default-extensions:
+    - ScopedTypeVariables
+    - TypeApplications
+    - InstanceSigs
+    - KindSignatures
+    - LambdaCase
+    - DeriveFunctor
+    - DeriveFoldable
+    - DeriveTraversable
+    - GeneralizedNewtypeDeriving
+    - TupleSections
+    - MultiParamTypeClasses
+    - FlexibleInstances
+    - FlexibleContexts
+    - UndecidableInstances
+    - NoMonomorphismRestriction
+    - NoStarIsType
