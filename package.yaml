@@ -19,6 +19,9 @@ extra-source-files:
 # common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/githubuser/project-cis552#readme>
 
+# You can add any libraries from stackage here (https://www.stackage.org/lts-18.8).
+# if you need a library that is not available on stackage, you will need to add 
+# an entry in stack.yaml.  
 dependencies:
 - base >= 4.14
 - HUnit >= 1.6
