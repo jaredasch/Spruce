@@ -51,7 +51,7 @@ library
       HUnit >=1.6
     , QuickCheck >=2.14.2
     , base >=4.14
-    , containers ==0.6.2.1
+    , containers >=0.6.2.1
     , mtl
   default-language: Haskell2010
 
@@ -83,7 +83,7 @@ executable project-cis552-exe
       HUnit >=1.6
     , QuickCheck >=2.14.2
     , base >=4.14
-    , containers ==0.6.2.1
+    , containers >=0.6.2.1
     , mtl
     , project-cis552
   default-language: Haskell2010
@@ -117,7 +117,7 @@ test-suite project-cis552-test
       HUnit >=1.6
     , QuickCheck >=2.14.2
     , base >=4.14
-    , containers ==0.6.2.1
+    , containers >=0.6.2.1
     , mtl
     , project-cis552
   default-language: Haskell2010
