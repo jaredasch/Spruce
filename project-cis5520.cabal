@@ -1,9 +1,9 @@
 cabal-version:  2.2
 name:           project-cis5520
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/upenn-cis5520/project-cis5520#readme>
-homepage:       https://github.com/upenn-cis5520/project-cis5520#readme
-bug-reports:    https://github.com/upenn-cis5520/project-cis5520/issues
+description:    Please see the README on GitHub at <https://github.com/githubuser/project-cis5520#readme>
+homepage:       https://github.com/githubuser/project-cis5520#readme
+bug-reports:    https://github.com/githubuser/project-cis5520/issues
 author:         Author name here
 maintainer:     example@example.com
 copyright:      2022 Author name here
@@ -16,7 +16,7 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/upenn-cis5520/project-cis5520
+  location: https://github.com/githubuser/project-cis5520
 
 common common-stanza
   ghc-options:         -Wno-type-defaults -fwarn-incomplete-patterns
