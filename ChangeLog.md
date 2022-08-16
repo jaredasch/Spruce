@@ -1,3 +1,5 @@
-# Changelog for project-cis552
+# Changelog for project-cis5520
 
-## Unreleased changes
+## 22fa
+- Uses lts-19.19
+- GHC2021 language + common stanza
