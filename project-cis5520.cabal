@@ -75,7 +75,7 @@ common common-stanza
     ScopedTypeVariables
     StandaloneDeriving
     StandaloneKindSignatures
-    StarIsType
+    NoStarIsType
     TraditionalRecordSyntax
     TupleSections
     TypeApplications
