@@ -5,14 +5,15 @@ the lecture demo and homework assignments for CIS 5520, but contains no
 code. Feel free to use this project for experimentation!
 
 If you want to change the name of this project, look for all occurrences of
-`project-cis5520` in the `project-cis5520.cabal` file. (And change the name of
-the file to match!)
-
+`project-cis5520` in the `project-cis5520.cabal` file and in the `hie.yaml` 
+file. (And change the name of the cabal file to match your new name!)
 
 ## Module organization
 
 Haskell packages typically divide their source code into three separate places:
-  - The bulk of your code should be developed as a reusable library in modules in the `src` directory. We've created [Lib.hs](src/Lib.hs) for you to get started. You can add additional modules here.
+  - The bulk of your code should be developed as a reusable library in 
+    modules in the `src` directory. We've created [Lib.hs](src/Lib.hs) 
+    for you to get started. You can add additional modules here.
   
   - The entry point for your executable is in [Main.hs](app/Main.hs). 
   
