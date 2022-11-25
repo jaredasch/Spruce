@@ -1,5 +1,5 @@
 module BQLParser
-    ( someFunc
+    ( queryP
     ) where
 
 import Control.Monad (void)
@@ -18,21 +18,24 @@ data BType =
   | ArrayT BType
   deriving (Show)
 
-newtype Query = Query [FDecl] deriving (Show)
+-- | The first argument contains all function declarations, the second is the main
+-- code to be executed
+data Query = Query [FDecl] Block deriving (Show)
 data FDecl = FDecl String [Var] Block deriving (Show)
 newtype Block = Block [Statement] deriving (Show)
 data Statement =
     Assign String Exp
   | Let Var Exp
-  | FCall String [Exp]
   | If Exp Block Block
   | Return Exp
   deriving (Show)
 
 data Exp = 
     Val Value 
+  | Var String 
   | BOp Bop Exp Exp
   | UOp Uop Exp
+  | FCall String [Exp]
   deriving (Show)
 
 data Value =
@@ -114,10 +117,21 @@ arrayTypeP = ArrayT <$> P.between (P.string "[") typeP (P.string "]")
 
 ----- Expression Parsing -----
 expP :: Parser Exp
-expP = expValP
+expP = expFcallP <|> expValP <|> expVarP
+
+expFcallP :: Parser Exp
+expFcallP = FCall <$> 
+  (varNameP <* P.string "(") <*> 
+  P.sepBy expP (trimP (P.string ",")) <*
+  P.string ")"
 
 expValP :: Parser Exp
 expValP = Val <$> valueP
+
+expVarP :: Parser Exp
+expVarP = Var <$> varNameP
+
+-- TODO: Add other expression types
 
 ----- Statement/Block Parsing -----
 blockP :: Parser Block
@@ -126,8 +140,9 @@ blockP = Block <$> many statementP
 statementP :: Parser Statement
 statementP = (letP <|> assignP <|> returnP) <* trimP (P.string ";")
 
+-- TODO: Make this correct
 varNameP :: Parser String
-varNameP = many P.alpha 
+varNameP = many (P.alpha <|> P.digit)
 
 typedVarP :: Parser Var
 typedVarP = flip VDecl <$> varNameP <*> (trimP (P.string ":") *> typeP)
@@ -148,8 +163,15 @@ fdeclP = FDecl <$>
   trimP (inParensP (P.sepBy typedVarP (trimP (P.string ",")))) <*>
   trimP (inBracesP blockP) 
 
+-- Query Parser
+data TopLevelStatement = S Statement | F FDecl
 
+queryP :: Parser Query
+queryP = queryCons <$> many ((F <$> fdeclP) <|> (S <$> statementP)) where
+  queryCons :: [TopLevelStatement] -> Query
+  queryCons = foldr aux (Query [] (Block [])) 
 
-
-someFunc :: String
-someFunc = "Hello"
+  aux :: TopLevelStatement -> Query -> Query
+  aux s (Query fdecls (Block main)) = case s of 
+    F f -> Query (f:fdecls) (Block main)
+    S s -> Query fdecls (Block (s : main)) 
