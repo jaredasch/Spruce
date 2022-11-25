@@ -1,5 +1,6 @@
 module BQLParser where
 
+import Data.Maybe as Maybe
 import Control.Monad (void)
 import Data.Functor (($>))
 import ParseLib (Parser)
@@ -7,14 +8,15 @@ import qualified ParseLib as P
 import Control.Applicative
 import Text.PrettyPrint (Doc, (<+>))
 import qualified Text.PrettyPrint as PP
+import Data.List (intercalate)
 
 ----- Structure of BQL Query -----
 data Var = VDecl BType String deriving (Show)
 data BType = 
-    IntT
-  | StringT
+    VoitT
   | BoolT
-  | VoidT
+  | IntT
+  | StringT
   | ArrayT BType
   deriving (Show)
 
@@ -206,7 +208,7 @@ blockP :: Parser Block
 blockP = Block <$> many statementP
 
 statementP :: Parser Statement
-statementP = (letP <|> assignP <|> returnP) <* trimP (P.string ";")
+statementP = letP <|> assignP <|> returnP <|> ifP
 
 varNameP :: Parser String
 varNameP = (:) <$> P.alpha <*> many (P.alpha <|> P.digit)
@@ -215,13 +217,19 @@ typedVarP :: Parser Var
 typedVarP = flip VDecl <$> varNameP <*> (trimP (P.string ":") *> typeP)
 
 letP :: Parser Statement
-letP = Let <$> (trimP (P.string "let ") *> typedVarP) <*> (trimP (P.string "=") *> expP) 
+letP = Let <$> (trimP (P.string "let ") *> typedVarP) <*> (trimP (P.string "=") *> expP) <* trimP (P.string ";")
 
 assignP :: Parser Statement
-assignP = Assign <$> varNameP <*> (trimP (P.string "=") *> expP) 
+assignP = Assign <$> varNameP <*> (trimP (P.string "=") *> expP) <* trimP (P.string ";")
 
 returnP :: Parser Statement 
-returnP = Return <$> (trimP (P.string "return ") *> expP)
+returnP = Return <$> (trimP (P.string "return ") *> expP) <* trimP (P.string ";")
+
+ifP :: Parser Statement
+ifP = If <$>
+  (P.string "if" *> inParensP expP) <*>
+  inBracesP blockP <*>
+  ((P.string "else" *> inBracesP blockP) <|> pure (Block []))
 
 ----- Function Declaration Parsing -----
 fdeclP :: Parser FDecl
@@ -283,12 +291,6 @@ instance PP Exp where
   pp (ArrInd a i) = pp a <> PP.char '[' <> pp i <> PP.char ']'
   pp (BOp o e1 e2) = pp e1 <> PP.char ' ' <> pp o <> PP.char ' ' <> pp e2
   pp (UOp o e) = pp o <+> pp e
-  pp (FCall _ _) = undefined
-
-
-  -- Val Value 
-  -- | Var String
-  -- | ArrInd Exp Exp
-  -- | BOp Bop Exp Exp
-  -- | UOp Uop Exp
-  -- | FCall String [Exp]
+  pp (FCall name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args)) where
+    joinBy :: Doc -> [Doc] -> Doc
+    joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
