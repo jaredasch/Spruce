@@ -5,6 +5,8 @@ import Data.Functor (($>))
 import ParseLib (Parser)
 import qualified ParseLib as P
 import Control.Applicative
+import Text.PrettyPrint (Doc, (<+>))
+import qualified Text.PrettyPrint as PP
 
 ----- Structure of BQL Query -----
 data Var = VDecl BType String deriving (Show)
@@ -162,15 +164,30 @@ uopP = trimP $
   P.string "!" $> Not 
 
 expP :: Parser Exp
-expP = expArrayIndP <|> orP where
+expP = orP where
   orP = andP `P.chainl1` opsAtLevel (precLevel Or)
   andP = equalityP `P.chainl1` opsAtLevel (precLevel And)
   equalityP = compP `P.chainl1` opsAtLevel (precLevel Eq)
   compP = sumP `P.chainl1` opsAtLevel (precLevel Lt)
   sumP = multP `P.chainl1` opsAtLevel (precLevel Add)
-  multP = unaryP `P.chainl1` opsAtLevel (precLevel Mult)
+  multP = indP `P.chainl1` opsAtLevel (precLevel Mult)
+  indP = arrIndP unaryP
   unaryP = baseP <|> UOp <$> uopP <*> unaryP  
-  baseP = expFCallP <|> Val <$> valueP
+  baseP = expFCallP <|> Var <$> varNameP <|> Val <$> valueP
+
+arrIndP :: Parser Exp -> Parser Exp
+arrIndP p = process <$> first <*> rest where
+  process :: Exp -> [Exp] -> Exp
+  process = foldl comb 
+
+  comb :: Exp -> Exp -> Exp
+  comb = ArrInd
+
+  first :: Parser Exp
+  first = p
+
+  rest :: Parser [Exp]
+  rest = many $ inBracketsP expP
 
 expFCallP :: Parser Exp
 expFCallP = FCall <$> 
@@ -184,10 +201,6 @@ expValP = Val <$> valueP
 expVarP :: Parser Exp
 expVarP = Var <$> varNameP
 
--- TODO : 2D Array
-expArrayIndP :: Parser Exp
-expArrayIndP = ArrInd <$> (Var <$> varNameP) <*> inBracketsP (trimP expP)
-
 ----- Statement/Block Parsing -----
 blockP :: Parser Block
 blockP = Block <$> many statementP
@@ -196,7 +209,7 @@ statementP :: Parser Statement
 statementP = (letP <|> assignP <|> returnP) <* trimP (P.string ";")
 
 varNameP :: Parser String
-varNameP = many (P.alpha <|> P.digit)
+varNameP = (:) <$> P.alpha <*> many (P.alpha <|> P.digit)
 
 typedVarP :: Parser Var
 typedVarP = flip VDecl <$> varNameP <*> (trimP (P.string ":") *> typeP)
@@ -217,7 +230,7 @@ fdeclP = FDecl <$>
   trimP (inParensP (P.sepBy typedVarP (trimP (P.string ",")))) <*>
   trimP (inBracesP blockP) 
 
--- Query Parser
+----- Query Parser -----
 data TopLevelStatement = S Statement | F FDecl
 
 queryP :: Parser Query
@@ -229,3 +242,53 @@ queryP = queryCons <$> many ((F <$> fdeclP) <|> (S <$> statementP)) where
   aux s (Query fdecls (Block main)) = case s of 
     F f -> Query (f:fdecls) (Block main)
     S s -> Query fdecls (Block (s : main)) 
+
+
+----- Pretty Printing -----
+class PP a where
+  pp :: a -> Doc 
+
+instance PP Bop where
+  pp Mult = PP.char '-'
+  pp Div = PP.char '/'
+  pp Mod = PP.char '%'
+  pp Add = PP.char '+'
+  pp Sub = PP.char '-'
+  pp Gt = PP.char '<'
+  pp Ge = PP.text "<="
+  pp Lt = PP.char '>'
+  pp Le = PP.text ">="
+  pp Eq = PP.text "=="
+  pp NEq = PP.text "!="
+  pp And = PP.text "and"
+  pp Or = PP.text "or"
+
+instance PP Uop where
+  pp Not = PP.char '!'
+  pp Neg = PP.char '-'
+
+instance PP Bool where
+  pp True = PP.text "true"
+  pp False = PP.text "false"
+
+instance PP Value where
+  pp (IntVal i) = PP.int i
+  pp (StringVal s) = PP.text s
+  pp (BoolVal b) = pp b
+  pp _ = undefined 
+
+instance PP Exp where
+  pp (Val v) = pp v
+  pp (Var s) = PP.text s
+  pp (ArrInd a i) = pp a <> PP.char '[' <> pp i <> PP.char ']'
+  pp (BOp o e1 e2) = pp e1 <> PP.char ' ' <> pp o <> PP.char ' ' <> pp e2
+  pp (UOp o e) = pp o <+> pp e
+  pp (FCall _ _) = undefined
+
+
+  -- Val Value 
+  -- | Var String
+  -- | ArrInd Exp Exp
+  -- | BOp Bop Exp Exp
+  -- | UOp Uop Exp
+  -- | FCall String [Exp]
