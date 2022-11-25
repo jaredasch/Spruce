@@ -1,6 +1,4 @@
-module BQLParser
-    ( queryP
-    ) where
+module BQLParser where
 
 import Control.Monad (void)
 import Data.Functor (($>))
@@ -32,7 +30,8 @@ data Statement =
 
 data Exp = 
     Val Value 
-  | Var String 
+  | Var String
+  | ArrInd Exp Exp
   | BOp Bop Exp Exp
   | UOp Uop Exp
   | FCall String [Exp]
@@ -53,12 +52,16 @@ data Bop =
   | Mod
   | And
   | Or
-  | Xor
+  | Gt
+  | Ge
+  | Eq
+  | NEq
+  | Lt
+  | Le 
   deriving (Show)
 
 data Uop = 
     Neg
-  | Len
   | Not
   deriving (Show)
 
@@ -82,6 +85,9 @@ inParensP p = P.between (P.string "(") p (P.string ")")
 
 inBracesP :: Parser a -> Parser a
 inBracesP p = P.between (P.string "{") p (P.string "}")
+
+inBracketsP :: Parser a -> Parser a
+inBracketsP p = P.between (P.string "[") p (P.string "]")
 
 ----- Value Parsing -----
 valueP :: Parser Value
@@ -116,11 +122,58 @@ arrayTypeP :: Parser BType
 arrayTypeP = ArrayT <$> P.between (P.string "[") typeP (P.string "]") 
 
 ----- Expression Parsing -----
-expP :: Parser Exp
-expP = expFcallP <|> expValP <|> expVarP
+precLevel :: Bop -> Int
+precLevel Mult = 12
+precLevel Div = 12
+precLevel Mod = 12
+precLevel Add = 11
+precLevel Sub = 11
+precLevel Gt = 9
+precLevel Ge = 9
+precLevel Lt = 9
+precLevel Le = 9
+precLevel Eq = 8
+precLevel NEq = 8
+precLevel And = 4
+precLevel Or = 3
 
-expFcallP :: Parser Exp
-expFcallP = FCall <$> 
+opsAtLevel :: Int -> Parser (Exp -> Exp -> Exp)
+opsAtLevel l = BOp <$> P.filter (\x -> precLevel x == l) bopP
+
+bopP :: Parser Bop
+bopP = trimP $
+  P.string "*" $> Mult <|>
+  P.string "/" $> Div <|>
+  P.string "%" $> Mod <|>
+  P.string "+" $> Add <|>
+  P.string "-" $> Sub <|>
+  P.string "<" $> Gt <|>
+  P.string "<=" $> Ge <|>
+  P.string ">" $> Lt <|>
+  P.string ">=" $> Le <|>
+  P.string "==" $> Eq <|>
+  P.string "!=" $> NEq <|>
+  P.string "and" $> And <|>
+  P.string "or" $> Or 
+
+uopP :: Parser Uop
+uopP = trimP $
+  P.string "-" $> Neg <|>
+  P.string "!" $> Not 
+
+expP :: Parser Exp
+expP = expArrayIndP <|> orP where
+  orP = andP `P.chainl1` opsAtLevel (precLevel Or)
+  andP = equalityP `P.chainl1` opsAtLevel (precLevel And)
+  equalityP = compP `P.chainl1` opsAtLevel (precLevel Eq)
+  compP = sumP `P.chainl1` opsAtLevel (precLevel Lt)
+  sumP = multP `P.chainl1` opsAtLevel (precLevel Add)
+  multP = unaryP `P.chainl1` opsAtLevel (precLevel Mult)
+  unaryP = baseP <|> UOp <$> uopP <*> unaryP  
+  baseP = expFCallP <|> Val <$> valueP
+
+expFCallP :: Parser Exp
+expFCallP = FCall <$> 
   (varNameP <* P.string "(") <*> 
   P.sepBy expP (trimP (P.string ",")) <*
   P.string ")"
@@ -131,7 +184,9 @@ expValP = Val <$> valueP
 expVarP :: Parser Exp
 expVarP = Var <$> varNameP
 
--- TODO: Add other expression types
+-- TODO : 2D Array
+expArrayIndP :: Parser Exp
+expArrayIndP = ArrInd <$> (Var <$> varNameP) <*> inBracketsP (trimP expP)
 
 ----- Statement/Block Parsing -----
 blockP :: Parser Block
@@ -140,7 +195,6 @@ blockP = Block <$> many statementP
 statementP :: Parser Statement
 statementP = (letP <|> assignP <|> returnP) <* trimP (P.string ";")
 
--- TODO: Make this correct
 varNameP :: Parser String
 varNameP = many (P.alpha <|> P.digit)
 
