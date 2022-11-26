@@ -13,7 +13,7 @@ import Data.List (intercalate)
 ----- Structure of BQL Query -----
 data Var = VDecl BType String deriving (Show)
 data BType = 
-    VoitT
+    VoidT
   | BoolT
   | IntT
   | StringT
@@ -175,7 +175,10 @@ expP = orP where
   multP = indP `P.chainl1` opsAtLevel (precLevel Mult)
   indP = arrIndP unaryP
   unaryP = baseP <|> UOp <$> uopP <*> unaryP  
-  baseP = expFCallP <|> Var <$> varNameP <|> Val <$> valueP
+  baseP = expFCallP <|> 
+          Var <$> varNameP <|> 
+          inParensP expP <|> 
+          Val <$> valueP
 
 arrIndP :: Parser Exp -> Parser Exp
 arrIndP p = process <$> first <*> rest where
@@ -228,8 +231,8 @@ returnP = Return <$> (trimP (P.string "return ") *> expP) <* trimP (P.string ";"
 ifP :: Parser Statement
 ifP = If <$>
   (P.string "if" *> inParensP expP) <*>
-  inBracesP blockP <*>
-  ((P.string "else" *> inBracesP blockP) <|> pure (Block []))
+  trimP (inBracesP blockP) <*>
+  ( trimP (P.string "else" *> trimP (inBracesP blockP)) <|> pure (Block []))
 
 ----- Function Declaration Parsing -----
 fdeclP :: Parser FDecl
@@ -279,11 +282,20 @@ instance PP Bool where
   pp True = PP.text "true"
   pp False = PP.text "false"
 
+instance PP BType where
+  pp VoidT = PP.text "void"
+  pp BoolT = PP.text "bool"
+  pp IntT = PP.text "int"
+  pp StringT = PP.text "string"
+  pp (ArrayT t) = PP.brackets $ pp t
+
 instance PP Value where
   pp (IntVal i) = PP.int i
   pp (StringVal s) = PP.text s
   pp (BoolVal b) = pp b
-  pp _ = undefined 
+  pp (ArrayVal l) = PP.brackets $ joinBy PP.comma (map pp l) where 
+    joinBy :: Doc -> [Doc] -> Doc
+    joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
 
 instance PP Exp where
   pp (Val v) = pp v
@@ -294,3 +306,32 @@ instance PP Exp where
   pp (FCall name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args)) where
     joinBy :: Doc -> [Doc] -> Doc
     joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
+
+instance PP Var where
+  pp (VDecl t n) = pp t <+> PP.char ':' <+> PP.text n
+
+instance PP Statement where
+  pp (Assign s e) = (PP.text s <+> PP.char '=' <+> pp e) <> PP.char ';'
+  pp (Let v e) = (pp v <+> PP.char '=' <+> pp e) <> PP.char ';'
+  pp (If e b1 (Block [])) = 
+    PP.text "if" <> PP.parens (pp e) <> PP.text " {" PP.$$
+    PP.nest 4 (pp b1) PP.$$ PP.text "}"
+  pp (If e b1 b2) = 
+    PP.text "if" <> PP.parens (pp e) <> PP.text " {" PP.$$
+    PP.nest 4 (pp b1) PP.$$ PP.text "} else {" PP.$$
+    PP.nest 4 (pp b2) PP.$$ PP.text "}"
+  pp (Return e) = (PP.text "return" <+> pp e) <> PP.char ';'
+
+instance PP FDecl where
+  pp (FDecl name args b) = 
+    PP.text "func " <> PP.text name <> PP.parens (joinBy PP.comma (map pp args)) <> PP.text " {" PP.$$
+    PP.nest 4 (pp b) PP.$$
+    PP.text "}" where
+      joinBy :: Doc -> [Doc] -> Doc
+      joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
+
+instance PP Block where
+  pp (Block stmts) = PP.vcat (map pp stmts)
+
+instance PP Query where
+  pp (Query fdecls main) = PP.vcat (map pp fdecls) PP.$$ pp main
