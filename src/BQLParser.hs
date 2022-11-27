@@ -18,7 +18,8 @@ data BType =
   | IntT
   | StringT
   | ArrayT BType
-  deriving (Show)
+  | AnyT -- Only to be used internally with empty arrays, can't be used by users
+  deriving (Show, Eq)
 
 -- | The first argument contains all function declarations, the second is the main
 -- code to be executed
@@ -36,15 +37,17 @@ data Exp =
     Val Value 
   | Var String
   | ArrInd Exp Exp
+  | ArrCons [Exp]
   | BOp Bop Exp Exp
   | UOp Uop Exp
   | FCall String [Exp]
   deriving (Show)
 
 data Value =
-    IntVal Int
-  | StringVal String
+    Null
   | BoolVal Bool
+  | IntVal Int
+  | StringVal String
   | ArrayVal [Value]
   deriving (Show)
       
@@ -151,10 +154,10 @@ bopP = trimP $
   P.string "%" $> Mod <|>
   P.string "+" $> Add <|>
   P.string "-" $> Sub <|>
-  P.string "<" $> Gt <|>
   P.string "<=" $> Ge <|>
-  P.string ">" $> Lt <|>
   P.string ">=" $> Le <|>
+  P.string "<" $> Gt <|>
+  P.string ">" $> Lt <|>
   P.string "==" $> Eq <|>
   P.string "!=" $> NEq <|>
   P.string "and" $> And <|>
@@ -175,10 +178,11 @@ expP = orP where
   multP = indP `P.chainl1` opsAtLevel (precLevel Mult)
   indP = arrIndP unaryP
   unaryP = baseP <|> UOp <$> uopP <*> unaryP  
-  baseP = expFCallP <|> 
-          Var <$> varNameP <|> 
+  baseP = expFCallP <|>
+          expArrP <|>
           inParensP expP <|> 
-          Val <$> valueP
+          Val <$> valueP <|> 
+          Var <$> varNameP 
 
 arrIndP :: Parser Exp -> Parser Exp
 arrIndP p = process <$> first <*> rest where
@@ -205,6 +209,9 @@ expValP = Val <$> valueP
 
 expVarP :: Parser Exp
 expVarP = Var <$> varNameP
+
+expArrP :: Parser Exp
+expArrP = ArrCons <$> inBracketsP (P.sepBy expP (trimP (P.string ",")))
 
 ----- Statement/Block Parsing -----
 blockP :: Parser Block
@@ -245,7 +252,7 @@ fdeclP = FDecl <$>
 data TopLevelStatement = S Statement | F FDecl
 
 queryP :: Parser Query
-queryP = queryCons <$> many ((F <$> fdeclP) <|> (S <$> statementP)) where
+queryP = queryCons <$> many ((F <$> fdeclP) <|> (S <$> statementP)) <* P.eof where
   queryCons :: [TopLevelStatement] -> Query
   queryCons = foldr aux (Query [] (Block [])) 
 
@@ -288,8 +295,10 @@ instance PP BType where
   pp IntT = PP.text "int"
   pp StringT = PP.text "string"
   pp (ArrayT t) = PP.brackets $ pp t
+  pp AnyT = PP.text "any"
 
 instance PP Value where
+  pp Null = PP.text "null"
   pp (IntVal i) = PP.int i
   pp (StringVal s) = PP.text s
   pp (BoolVal b) = pp b
@@ -304,6 +313,9 @@ instance PP Exp where
   pp (BOp o e1 e2) = pp e1 <> PP.char ' ' <> pp o <> PP.char ' ' <> pp e2
   pp (UOp o e) = pp o <+> pp e
   pp (FCall name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args)) where
+    joinBy :: Doc -> [Doc] -> Doc
+    joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
+  pp (ArrCons exps) = PP.brackets $ joinBy PP.comma (map pp exps) where 
     joinBy :: Doc -> [Doc] -> Doc
     joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
 

@@ -87,6 +87,8 @@ library
       common-stanza
   exposed-modules:
       ParseLib
+      BQLParser
+      BQLEvaluator
   hs-source-dirs:
       src
   default-language: Haskell2010
