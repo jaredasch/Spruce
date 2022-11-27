@@ -44,8 +44,7 @@ data Exp =
   deriving (Show)
 
 data Value =
-    Null
-  | BoolVal Bool
+    BoolVal Bool
   | IntVal Int
   | StringVal String
   | ArrayVal [Value]
@@ -298,7 +297,6 @@ instance PP BType where
   pp AnyT = PP.text "any"
 
 instance PP Value where
-  pp Null = PP.text "null"
   pp (IntVal i) = PP.int i
   pp (StringVal s) = PP.text s
   pp (BoolVal b) = pp b

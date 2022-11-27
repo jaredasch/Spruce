@@ -7,8 +7,9 @@ import BQLParser
       BType(ArrayT, BoolT, IntT, StringT, AnyT),
       Value(..),
       Bop(..),
+      Uop(..),
       PP(..),
-      expP )
+      expP, Uop (Neg) )
 import Data.Map as Map
 import Control.Applicative
 import Control.Monad.Except
@@ -90,7 +91,6 @@ typeOf :: Value -> Maybe BType
 typeOf (BoolVal _) = Just BoolT
 typeOf (IntVal _) = Just IntT
 typeOf (StringVal _) = Just StringT
-typeOf Null = Just AnyT
 typeOf (ArrayVal []) = Just $ ArrayT AnyT
 typeOf (ArrayVal [h]) = typeOf h
 typeOf (ArrayVal (h:t)) = do
@@ -102,8 +102,6 @@ typeOf (ArrayVal (h:t)) = do
 
 typeGuard :: (MonadError String m, MonadState Store m) => TypedVal -> BType -> String -> m ()
 typeGuard _ AnyT m = do return ()
-typeGuard (Typed Null _) BoolT m = do return ()
-typeGuard (Typed Null _) _ m = throwError "Null value"
 typeGuard (Typed _ t) t' m = if t == t' then return () else throwError m
 
 intBinOpToF :: Bop -> (Int -> Int -> Int)
@@ -158,9 +156,6 @@ evalBoolOpExp (BOp op e1 e2) opName = do
     typeGuard e2' BoolT ("Arguments for " <> opName <> " must be booleans")
     case (v1, v2) of
         (BoolVal v1', BoolVal v2') -> return $ BoolVal (boolOpToF op v1' v2') `as` BoolT 
-        (BoolVal v1', Null) -> return $ BoolVal (boolOpToF op v1' False) `as` BoolT 
-        (Null, BoolVal v2') -> return $ BoolVal (boolOpToF op False v2') `as` BoolT 
-        (Null, Null) -> return $ BoolVal (boolOpToF op False False) `as` BoolT 
         _ -> error "Typeguard doesn't work as expected"
 evalBoolOpExp _ _ = error "Calling evalCompExp without comp exp"
 
@@ -189,9 +184,46 @@ evalExp e@(BOp Lt _ _) = evalCompExp e "comparison"
 evalExp e@(BOp Le _ _) = evalCompExp e "comparison"
 evalExp e@(BOp And _ _) = evalBoolOpExp e "and"
 evalExp e@(BOp Or _ _) = evalBoolOpExp e "or"
-evalExp (ArrInd arr ind) = undefined
-evalExp (ArrCons exps) = undefined
-evalExp (UOp op e) = undefined
+
+evalExp (ArrInd arr' ind') = do
+    Typed arrV arrT <- evalExp arr'
+    Typed indV indT <- evalExp ind'
+    case (arrT, arrV, indT, indV) of
+        (ArrayT innerT, ArrayVal vals, IntT, IntVal i) ->
+            if i < 0 || length vals <= i then 
+                throwError "Index out of bounds"
+            else
+                return (vals !! i `as` innerT)
+        _ -> error "ERR: type system internal error"
+
+evalExp (ArrCons []) = do return (ArrayVal [] `as` ArrayT AnyT)
+evalExp (ArrCons [h]) = do
+    Typed v t <- evalExp h
+    return $ ArrayVal [v] `as` ArrayT t
+evalExp (ArrCons (h:t)) = do
+    Typed hv ht <- evalExp h
+    Typed tv tt <- evalExp $ ArrCons t
+    case (tv, tt) of
+        (ArrayVal tvals, ArrayT inner) -> 
+            if inner == ht then
+                return $ ArrayVal (hv : tvals) `as` ArrayT inner
+            else
+                throwError "Type mismatch in array"
+        _ -> error "ERR: Type system internal error"
+    
+evalExp (UOp Neg e) = do
+    e1'@(Typed v1 _) <- evalExp e
+    typeGuard e1' IntT "Argument for negation must be an integer"
+    case v1 of
+        IntVal v1' -> return $ IntVal (-v1') `as` IntT 
+        _ -> error "Typeguard doesn't work as expected"
+evalExp (UOp Not e) = do
+    e1'@(Typed v1 _) <- evalExp e
+    typeGuard e1' BoolT "Argument for not must be a boolean"
+    case v1 of
+        BoolVal v1' -> return $ BoolVal (not v1') `as` BoolT 
+        _ -> error "Typeguard doesn't work as expected"
+
 evalExp (FCall name args) = undefined 
 
 evalStrExp :: String -> Doc
