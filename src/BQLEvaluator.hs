@@ -387,7 +387,16 @@ evalStatement (FCallStatement name args) scope = do
     e <- evalExp (FCall name args)
     typeGuard e VoidT "Calling function as statement with non-void return type"
     return Nothing
-evalStatement (If {}) scope = undefined
+evalStatement (If exp b1 b2) scope = do
+    e <- evalExp exp
+    typeGuard e BoolT "If-else expression guard must be of type bool"
+    case e of 
+        Typed (BoolVal b) BoolT -> 
+            if b then
+                evalBlock b1 scope
+            else 
+                evalBlock b2 scope
+        _ -> error "ERR: Type system internal error"
 
 evalStrBlock :: String -> Doc
 evalStrBlock s =
@@ -427,6 +436,7 @@ evalQuery (Query fdecls main) = do
             put initStore
             evalBlock main Global
 
+----- Helper function for testing -----
 evalQueryStr :: String -> Doc
 evalQueryStr s =
     let res = doParse queryP s in
@@ -438,12 +448,3 @@ evalQueryStr s =
                 Left err -> PP.text err
                 Right Nothing -> PP.text "Success: void"
                 Right (Just result) -> PP.text "Success : " <> PP.parens (pp result)
-
-evalQueryStore :: String -> Store
-evalQueryStore s =
-    let res = doParse queryP s in
-    case res of
-        Nothing -> emptyStore
-        Just (q, r) -> 
-            let (x, store) = runIdentity (runStateT (runExceptT (evalQuery q)) emptyStore) in
-            store
