@@ -35,6 +35,7 @@ import ParseLib (Parser(doParse))
 import Text.PrettyPrint (Doc, (<+>))
 import qualified Text.PrettyPrint as PP
 import Data.Maybe (isNothing, isJust)
+import qualified Data.Maybe as Maybe
 
 type KVStore = Map String (Map String TypedVal)
 type VarStore = Map String TypedVal
@@ -153,13 +154,13 @@ setVar getS updateS (LArrInd arr' ind') (Typed val valT) = do
 
 
 ----- Get/Set internal functions for KV store -----
-getKV :: (MonadError String m, MonadState Store m) => String -> String -> m (Maybe TypedVal)
+getKV :: (MonadError String m, MonadState Store m) => String -> String -> m TypedVal
 getKV rowKey colKey = do
     allVars <- get
-    let res = do 
+    let resM = do 
         row <- Map.lookup rowKey (persist allVars)
         Map.lookup colKey row
-    return res
+    extractMaybeOrError resM ("No value at " ++ rowKey ++ ", " ++ colKey) 
 
 setKV :: (MonadError String m, MonadState Store m) => String -> String -> TypedVal -> m ()
 setKV rowKey colKey val = do
@@ -170,7 +171,14 @@ setKV rowKey colKey val = do
     let updatedStore = allVars {persist=updatedKV}
     put updatedStore
 
-
+existsKV :: (MonadError String m, MonadState Store m) => String -> String -> m Bool
+existsKV rowKey colKey = do
+    allVars <- get
+    let resM = do 
+        row <- Map.lookup rowKey (persist allVars)
+        Map.lookup colKey row
+    return (Maybe.isJust resM)
+    
 ----- Error Handling and Type Checking -----
 typeOf :: Value -> Maybe BType
 typeOf (BoolVal _) = Just BoolT
@@ -261,7 +269,7 @@ evalBoolOpExp _ _ = error "Calling evalCompExp without comp exp"
 
 
 ----- Main logic for expression evaluation -----
-evalExp :: forall m. (MonadError String m, MonadState Store m) => Exp -> m TypedVal
+evalExp :: forall m . (MonadError String m, MonadState Store m) => Exp -> m TypedVal
 evalExp (Val v) = do
     case typeOf v of
         Just t -> return $ v `as` t
@@ -319,6 +327,7 @@ evalExp (UOp Neg e) = do
     case v1 of
         IntVal v1' -> return $ IntVal (-v1') `as` IntT 
         _ -> error "Typeguard doesn't work as expected"
+
 evalExp (UOp Not e) = do
     e1'@(Typed v1 _) <- evalExp e
     typeGuard e1' BoolT "Argument for not must be a boolean"
@@ -326,31 +335,24 @@ evalExp (UOp Not e) = do
         BoolVal v1' -> return $ BoolVal (not v1') `as` BoolT 
         _ -> error "Typeguard doesn't work as expected"
 
-evalExp (FCall name args) = do
-    allVars <- get
-    f@(FDecl name argDecls expectedRetType body) <- extractMaybeOrError 
-        (Map.lookup name (fdecls allVars)) 
-        ("No function " ++ name)
-    let prevLocals = locals allVars
-    let newScopedStore = allVars {locals=Map.empty} 
-    newScopedStore <- setParams (zip argDecls args)
-    put allVars {locals=newScopedStore}
-    ret <- evalBlock body Local
-    put allVars {locals=prevLocals}
-    case (ret, expectedRetType) of
-        (Just x@(Typed retVal retTy), _) -> return x
-        (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
-        (_, _) -> throwError ("Return type for " <> name <> "doesn't match return value")
-
+evalExp (FCall name args) = 
+    case libFuncLookup name of 
+        Just f -> do execLibFunc f args
+        Nothing -> do execUserFunc name args
     where 
-    setParams :: [(VarDecl, Exp)] -> m VarStore
-    setParams [] = do return Map.empty
-    setParams ((VDecl vty vname, exp) : t) = do
-        e@(Typed eVal eTy) <- evalExp exp
-        typeGuard e vty "Argument type doesn't match function declaration"
-        rem <- setParams t
-        return $ Map.insert vname e rem
-        
+        execUserFunc :: String -> [Exp] -> m TypedVal
+        execUserFunc = undefined
+
+        execLibFunc :: (MonadError String m, MonadState Store m) => ([TypedVal] -> m TypedVal) -> [Exp] -> m TypedVal
+        execLibFunc f args = do
+            argVals <- foldr aux (return []) args
+            f argVals
+
+        aux :: (MonadError String m, MonadState Store m) => Exp -> m [TypedVal] -> m [TypedVal]
+        aux exp acc = do
+            val <- evalExp exp
+            rem <- acc
+            return (val : rem)      
 
 evalStrExp :: String -> Doc
 evalStrExp s =
@@ -447,6 +449,45 @@ evalQuery (Query fdecls main) = do
         do 
             put initStore
             evalBlock main Global
+
+----- Library Functions -----
+libFuncLookup :: (MonadError String m, MonadState Store m) => String -> Maybe ([TypedVal] -> m TypedVal)
+libFuncLookup "get" = Just libGetKV
+libFuncLookup "set" = Just libSetKV
+libFuncLookup "exists" = Just libExistsKV
+libFuncLookup x = Nothing
+
+guardTypes :: (MonadError String m, MonadState Store m) => [TypedVal] -> [BType] -> m ()
+guardTypes [] [] = do return ()
+guardTypes (valH:valT) (tyH:tyT) = do
+    typeGuard valH tyH "Mismatched type in function call"
+    guardTypes valT tyT
+guardTypes _ _ = do throwError "Mismatched number of arguments"
+
+libGetKV :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
+libGetKV args = do
+    guardTypes args [StringT, StringT]
+    case args of 
+        [Typed (StringVal rowKey) _, Typed (StringVal colKey) _] -> getKV rowKey colKey
+        _ -> error "ERR: Type system internal error"
+
+libSetKV :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
+libSetKV args = do
+    guardTypes args [StringT, StringT, AnyT]
+    case args of 
+        [Typed (StringVal rowKey) _, Typed (StringVal colKey) _, val] -> do
+            setKV rowKey colKey val
+            return (IntVal 0 `as` VoidT)
+        _ -> error "ERR: Type system internal error"
+
+libExistsKV :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
+libExistsKV args = do
+    guardTypes args [StringT, StringT]
+    case args of 
+        [Typed (StringVal rowKey) _, Typed (StringVal colKey) _] -> do
+            exists <- existsKV rowKey colKey
+            return (BoolVal exists `as` BoolT)
+        _ -> error "ERR: Type system internal error"
 
 ----- Helper function for testing -----
 evalQueryStr :: String -> Doc
