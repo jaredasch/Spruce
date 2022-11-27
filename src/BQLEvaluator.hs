@@ -27,7 +27,8 @@ import Control.Monad.Identity
 import Control.Monad.State
   ( MonadState (get, put),
     StateT (runStateT),
-    State
+    State,
+    gets,
   )
 import ParseLib (Parser(doParse))
 import Text.PrettyPrint (Doc, (<+>))
@@ -56,13 +57,45 @@ data Store = St {
 emptyStore :: Store
 emptyStore = St {locals=Map.empty, globals=Map.empty, persist=Map.empty}
 
-getVar :: (MonadError String m, MonadState Store m) => LValue -> m (Maybe TypedVal)
-getVar (LVar name) = do 
-    allVars <- get
-    return (Map.lookup name (locals allVars) <|> 
-            Map.lookup name (globals allVars))
-getVar (LArrInd arr' ind') = do
-    arrM <- getVar arr'
+type GetStoreFunc m = m VarStore
+type UpdateStoreFunc m = VarStore -> m ()
+
+localGetStoreFunc :: (MonadError String m, MonadState Store m) => m VarStore
+localGetStoreFunc = gets locals
+
+localUpdateStoreFunc :: (MonadError String m, MonadState Store m) => VarStore -> m ()
+localUpdateStoreFunc v = do
+    allVars <- get 
+    put allVars {locals=v}
+
+getLocal :: (MonadError String m, MonadState Store m) => LValue -> m (Maybe TypedVal)
+getLocal = getVar localGetStoreFunc
+
+setLocal :: (MonadError String m, MonadState Store m) => LValue -> TypedVal -> m ()
+setLocal = setVar localGetStoreFunc localUpdateStoreFunc
+
+globalGetStoreFunc :: (MonadError String m, MonadState Store m) => m VarStore
+globalGetStoreFunc = gets globals
+
+globalUpdateStoreFunc :: (MonadError String m, MonadState Store m) => VarStore -> m ()
+globalUpdateStoreFunc v = do
+    allVars <- get 
+    put allVars {globals=v}
+
+getGlobal :: (MonadError String m, MonadState Store m) => LValue -> m (Maybe TypedVal)
+getGlobal = getVar globalGetStoreFunc
+
+setGlobal :: (MonadError String m, MonadState Store m) => LValue -> TypedVal -> m ()
+setGlobal = setVar globalGetStoreFunc globalUpdateStoreFunc
+
+----- Internal functions for setting/getting over an arbitrary VarStore -----
+getVar :: (MonadError String m, MonadState Store m) => GetStoreFunc m -> LValue -> m (Maybe TypedVal)
+getVar getS (LVar name) = do 
+    store <- getS
+    return (Map.lookup name store <|> 
+            Map.lookup name store)
+getVar getS (LArrInd arr' ind') = do
+    arrM <- getVar getS arr'
     arr@(Typed arrV arrT) <- extractMaybeOrError arrM "Cannot resolve array"
     typeGuardArr arr "Cannot index into non-array type"
     ind@(Typed indV _) <- evalExp ind'
@@ -71,14 +104,14 @@ getVar (LArrInd arr' ind') = do
         (ArrayVal vals, IntVal i, ArrayT innerT) -> return $ Just (vals !! i `as` innerT)
         _ -> return Nothing
 
-setLocal :: (MonadError String m, MonadState Store m) => LValue -> TypedVal -> m ()
-setLocal (LVar name) val = do
-    allVars <- get
-    let updatedStore = allVars { locals = Map.insert name val (locals allVars)} in
-        put updatedStore
+setVar :: (MonadError String m, MonadState Store m) => GetStoreFunc m -> UpdateStoreFunc m -> LValue -> TypedVal -> m ()
+setVar getS updateS (LVar name) val = do
+    store <- getS
+    let updatedStore = Map.insert name val store in
+        updateS updatedStore
 
-setLocal (LArrInd arr' ind') (Typed val valT) = do
-    arrM <- getVar arr'
+setVar getS updateS (LArrInd arr' ind') (Typed val valT) = do
+    arrM <- getVar getS arr'
 
     arr@(Typed arrV arrT) <- extractMaybeOrError arrM "Cannot resolve variable"
     ind@(Typed indV indT) <- evalExp ind'
@@ -92,19 +125,15 @@ setLocal (LArrInd arr' ind') (Typed val valT) = do
             if i < 0 || length vals <= i then
                 throwError "Array index out of bounds"
             else
-                setLocal arr' (ArrayVal (setAtIndex vals i val) `as` arrT)
+                setVar getS updateS arr' (ArrayVal (setAtIndex vals i val) `as` arrT)
         _ -> error "ERR: Type system failure"
     where 
     -- | Credit to https://stackoverflow.com/questions/15530511/how-to-set-value-in-nth-element-in-a-haskell-list
     setAtIndex :: [a] -> Int -> a -> [a]
     setAtIndex l i v = Prelude.take i l ++ [v] ++ Prelude.drop (i + 1) l
 
-setGlobal :: (MonadError String m, MonadState Store m) => String -> TypedVal -> m ()
-setGlobal name val = do
-    allVars <- get
-    let updatedStore = allVars { globals = Map.insert name val (globals allVars)} in
-        put allVars
 
+----- Get/Set internal functions for KV store -----
 getKV :: (MonadError String m, MonadState Store m) => String -> String -> m (Maybe TypedVal)
 getKV rowKey colKey = do
     allVars <- get
@@ -219,7 +248,7 @@ evalExp (Val v) = do
         Just t -> return $ v `as` t
         _ -> throwError $ "Type error" ++ show v
 evalExp (Var s) = do
-    var <- getVar (LVar s)
+    var <- getLocal (LVar s)
     case var of 
         Just v -> return v
         Nothing -> throwError $ "Use of undeclared variable " ++ s
@@ -295,7 +324,7 @@ evalStrExp s =
 evalStatement :: (MonadError String m, MonadState Store m) => Statement -> m (Maybe TypedVal)
 
 evalStatement (Let v@(VDecl t name) exp) = do
-    exists <- getVar (LVar name)
+    exists <- getLocal (LVar name)
     guardWithErrorMsg (isNothing exists) "Error: redeclaring variable"
     (Typed ev et) <- evalExp exp
     guardWithErrorMsg (t == et) ("Error: incorrect type in declaration for " ++ name) 
@@ -303,7 +332,7 @@ evalStatement (Let v@(VDecl t name) exp) = do
     return Nothing
 
 evalStatement (Assign lval exp) = do
-    exists <- getVar lval
+    exists <- getLocal lval
     (Typed currentV expectedT) <- extractMaybeOrError exists "Error: assignment to undeclared variable"
     e <- evalExp exp
     typeGuard e expectedT "Error: Assignment must respect the use the same type"
