@@ -383,6 +383,10 @@ evalStatement (Assign lval exp) scope = do
 evalStatement (Return exp) scope = do
     tv <- evalExp exp
     return $ Just tv 
+evalStatement (FCallStatement name args) scope = do
+    e <- evalExp (FCall name args)
+    typeGuard e VoidT "Calling function as statement with non-void return type"
+    return Nothing
 evalStatement (If {}) scope = undefined
 
 evalStrBlock :: String -> Doc

@@ -31,6 +31,7 @@ data Statement =
   | Let VarDecl Exp
   | If Exp Block Block
   | Return Exp
+  | FCallStatement String [Exp]
   deriving (Show)
 
 data Exp = 
@@ -118,7 +119,7 @@ arrayValP = ArrayVal <$> P.between (P.string "[") (P.sepBy valueP (wsP $ P.strin
 
 ----- Type Parsing -----
 typeP :: Parser BType
-typeP = intTypeP <|> stringTypeP <|> boolTypeP <|> arrayTypeP
+typeP = intTypeP <|> stringTypeP <|> boolTypeP <|> arrayTypeP <|> voidTypeP
 
 intTypeP :: Parser BType
 intTypeP = wsP (P.string "int") $> IntT
@@ -128,6 +129,9 @@ stringTypeP = wsP (P.string "string") $> StringT
 
 boolTypeP :: Parser BType 
 boolTypeP = wsP (P.string "bool") $> BoolT
+
+voidTypeP :: Parser BType 
+voidTypeP = wsP (P.string "void") $> VoidT
 
 arrayTypeP :: Parser BType
 arrayTypeP = ArrayT <$> P.between (P.string "[") typeP (P.string "]") 
@@ -236,7 +240,7 @@ blockP :: Parser Block
 blockP = Block <$> many statementP
 
 statementP :: Parser Statement
-statementP = letP <|> assignP <|> returnP <|> ifP
+statementP = letP <|> assignP <|> returnP <|> ifP <|> fCallStatementP
 
 varNameP :: Parser String
 varNameP = (:) <$> P.alpha <*> many (P.alpha <|> P.digit)
@@ -258,6 +262,13 @@ ifP = If <$>
   (P.string "if" *> inParensP expP) <*>
   trimP (inBracesP blockP) <*>
   ( trimP (P.string "else" *> trimP (inBracesP blockP)) <|> pure (Block []))
+
+fCallStatementP :: Parser Statement
+fCallStatementP =  FCallStatement <$> 
+  (varNameP <* P.string "(") <*> 
+  P.sepBy expP (trimP (P.string ",")) <*
+  P.string ")" <* 
+  trimP (P.string ";")
 
 ----- Function Declaration Parsing -----
 fdeclP :: Parser FDecl
@@ -355,6 +366,9 @@ instance PP Statement where
     PP.nest 4 (pp b1) PP.$$ PP.text "} else {" PP.$$
     PP.nest 4 (pp b2) PP.$$ PP.text "}"
   pp (Return e) = (PP.text "return" <+> pp e) <> PP.char ';'
+  pp (FCallStatement name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args)) where
+    joinBy :: Doc -> [Doc] -> Doc
+    joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
 
 instance PP FDecl where
   pp (FDecl name args returnType b) = 
