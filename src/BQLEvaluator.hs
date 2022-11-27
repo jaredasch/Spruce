@@ -335,24 +335,63 @@ evalExp (UOp Not e) = do
         BoolVal v1' -> return $ BoolVal (not v1') `as` BoolT 
         _ -> error "Typeguard doesn't work as expected"
 
+    -- allVars <- get
+    -- f@(FDecl name argDecls expectedRetType body) <- extractMaybeOrError 
+    --     (Map.lookup name (fdecls allVars)) 
+    --     ("No function " ++ name)
+    -- let prevLocals = locals allVars
+    -- let newScopedStore = allVars {locals=Map.empty} 
+    -- newScopedStore <- setParams (zip argDecls args)
+    -- put allVars {locals=newScopedStore}
+    -- ret <- evalBlock body Local
+    -- put allVars {locals=prevLocals}
+    -- case (ret, expectedRetType) of
+    --     (Just x@(Typed retVal retTy), _) -> return x
+    --     (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
+    --     (_, _) -> throwError ("Return type for " <> name <> "doesn't match return value")
+
+
 evalExp (FCall name args) = 
     case libFuncLookup name of 
         Just f -> do execLibFunc f args
         Nothing -> do execUserFunc name args
+    
+execUserFunc :: forall m.(MonadError String m, MonadState Store m) => String -> [Exp] -> m TypedVal
+execUserFunc name args = do
+    allVars <- get
+    f@(FDecl name argDecls expectedRetType body) <- extractMaybeOrError 
+        (Map.lookup name (fdecls allVars)) 
+        ("No function " ++ name)  
+    let prevLocals = locals allVars
+    let newScopedStore = allVars {locals=Map.empty} 
+    newScopedStore <- setParams argDecls args
+    put allVars {locals=newScopedStore}
+    ret <- evalBlock body Local
+    put allVars {locals=prevLocals}
+    case (ret, expectedRetType) of
+        (Just x@(Typed retVal retTy), _) -> return x
+        (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
+        (_, _) -> throwError ("Return type for " <> name <> "doesn't match return value")
+    where
+    setParams :: [VarDecl] -> [Exp] -> m VarStore
+    setParams [] [] = do return Map.empty
+    setParams ((VDecl vty vname):declT) (exp:expT) = do
+        e@(Typed eVal eTy) <- evalExp exp
+        typeGuard e vty "Argument type doesn't match function declaration"
+        rem <- setParams declT expT
+        return $ Map.insert vname e rem
+    setParams _ _ = do throwError ("Argument mismatch in call to " <> name)
+
+execLibFunc :: (MonadError String m, MonadState Store m) => ([TypedVal] -> m TypedVal) -> [Exp] -> m TypedVal
+execLibFunc f args = do
+    argVals <- foldr aux (return []) args
+    f argVals
     where 
-        execUserFunc :: String -> [Exp] -> m TypedVal
-        execUserFunc = undefined
-
-        execLibFunc :: (MonadError String m, MonadState Store m) => ([TypedVal] -> m TypedVal) -> [Exp] -> m TypedVal
-        execLibFunc f args = do
-            argVals <- foldr aux (return []) args
-            f argVals
-
-        aux :: (MonadError String m, MonadState Store m) => Exp -> m [TypedVal] -> m [TypedVal]
-        aux exp acc = do
-            val <- evalExp exp
-            rem <- acc
-            return (val : rem)      
+    aux :: (MonadError String m, MonadState Store m) => Exp -> m [TypedVal] -> m [TypedVal]
+    aux exp acc = do
+        val <- evalExp exp
+        rem <- acc
+        return (val : rem)      
 
 evalStrExp :: String -> Doc
 evalStrExp s =
@@ -457,23 +496,23 @@ libFuncLookup "set" = Just libSetKV
 libFuncLookup "exists" = Just libExistsKV
 libFuncLookup x = Nothing
 
-guardTypes :: (MonadError String m, MonadState Store m) => [TypedVal] -> [BType] -> m ()
-guardTypes [] [] = do return ()
-guardTypes (valH:valT) (tyH:tyT) = do
-    typeGuard valH tyH "Mismatched type in function call"
-    guardTypes valT tyT
-guardTypes _ _ = do throwError "Mismatched number of arguments"
+guardTypes :: (MonadError String m, MonadState Store m) => [TypedVal] -> [BType] -> String -> m ()
+guardTypes [] [] fname = do return ()
+guardTypes (valH:valT) (tyH:tyT) fname = do
+    typeGuard valH tyH ("Mismatched type in function call for " ++ fname)
+    guardTypes valT tyT fname
+guardTypes _ _ fname = do throwError ("Mismatched number of arguments in " ++ fname)
 
 libGetKV :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
 libGetKV args = do
-    guardTypes args [StringT, StringT]
+    guardTypes args [StringT, StringT] "get"
     case args of 
         [Typed (StringVal rowKey) _, Typed (StringVal colKey) _] -> getKV rowKey colKey
         _ -> error "ERR: Type system internal error"
 
 libSetKV :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
 libSetKV args = do
-    guardTypes args [StringT, StringT, AnyT]
+    guardTypes args [StringT, StringT, AnyT] "set"
     case args of 
         [Typed (StringVal rowKey) _, Typed (StringVal colKey) _, val] -> do
             setKV rowKey colKey val
@@ -482,7 +521,7 @@ libSetKV args = do
 
 libExistsKV :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
 libExistsKV args = do
-    guardTypes args [StringT, StringT]
+    guardTypes args [StringT, StringT] "exists"
     case args of 
         [Typed (StringVal rowKey) _, Typed (StringVal colKey) _] -> do
             exists <- existsKV rowKey colKey
