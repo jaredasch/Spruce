@@ -32,6 +32,7 @@ data Statement =
   | If Exp Block Block
   | Return Exp
   | FCallStatement String [Exp]
+  | While Exp Block
   deriving (Show)
 
 data Exp = 
@@ -240,7 +241,7 @@ blockP :: Parser Block
 blockP = Block <$> many statementP
 
 statementP :: Parser Statement
-statementP = letP <|> assignP <|> returnP <|> ifP <|> fCallStatementP
+statementP = letP <|> assignP <|> returnP <|> ifP <|> fCallStatementP <|> whileP
 
 varNameP :: Parser String
 varNameP = (:) <$> P.alpha <*> many (P.alpha <|> P.digit)
@@ -256,6 +257,11 @@ assignP = Assign <$> trimP lvalP <*> (trimP (P.string "=") *> expP) <* trimP (P.
 
 returnP :: Parser Statement 
 returnP = Return <$> (trimP (P.string "return ") *> expP) <* trimP (P.string ";")
+
+whileP :: Parser Statement
+whileP = While <$>
+  (trimP (P.string "while") *> trimP (inParensP expP))
+  <*> inBracesP blockP 
 
 ifP :: Parser Statement
 ifP = If <$>
@@ -369,6 +375,9 @@ instance PP Statement where
   pp (FCallStatement name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args)) where
     joinBy :: Doc -> [Doc] -> Doc
     joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
+  pp (While exp body) = PP.text "while " <> PP.parens (pp exp)  <> PP.text " {" PP.$$
+    PP.nest 4 (pp body) PP.$$
+    PP.text "}"
 
 instance PP FDecl where
   pp (FDecl name args returnType b) = 

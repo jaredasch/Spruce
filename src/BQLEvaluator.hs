@@ -397,6 +397,18 @@ evalStatement (If exp b1 b2) scope = do
             else 
                 evalBlock b2 scope
         _ -> error "ERR: Type system internal error"
+evalStatement (While exp body) scope = do
+    e@(Typed expV expT) <- evalExp exp
+    typeGuard e BoolT "Error: guard of while loop must be boolean type"
+    case expV of
+        BoolVal b -> 
+            if b then do
+                val <- evalBlock body scope
+                case val of
+                    Nothing -> evalStatement (While exp body) scope
+                    Just x -> return $ Just x 
+            else return Nothing  
+        _ -> error "ERR: Type system internal error"
 
 evalStrBlock :: String -> Doc
 evalStrBlock s =
