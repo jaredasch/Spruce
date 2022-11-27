@@ -24,7 +24,7 @@ data BType =
 -- | The first argument contains all function declarations, the second is the main
 -- code to be executed
 data Query = Query [FDecl] Block deriving (Show)
-data FDecl = FDecl String [VarDecl] Block deriving (Show)
+data FDecl = FDecl String [VarDecl] BType Block deriving (Show)
 newtype Block = Block [Statement] deriving (Show)
 data Statement =
     Assign LValue Exp
@@ -263,7 +263,8 @@ ifP = If <$>
 fdeclP :: Parser FDecl
 fdeclP = FDecl <$> 
   (trimP (P.string "func ") *> varNameP) <*>
-  trimP (inParensP (P.sepBy typedVarP (trimP (P.string ",")))) <*>
+  trimP (inParensP (P.sepBy typedVarP (trimP (P.string ",")))) <*> 
+  trimP (trimP (P.string "->") *> typeP) <*>
   trimP (inBracesP blockP) 
 
 ----- Query Parser -----
@@ -356,7 +357,7 @@ instance PP Statement where
   pp (Return e) = (PP.text "return" <+> pp e) <> PP.char ';'
 
 instance PP FDecl where
-  pp (FDecl name args b) = 
+  pp (FDecl name args returnType b) = 
     PP.text "func " <> PP.text name <> PP.parens (joinBy PP.comma (map pp args)) <> PP.text " {" PP.$$
     PP.nest 4 (pp b) PP.$$
     PP.text "}" where

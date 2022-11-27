@@ -1,10 +1,10 @@
 module BQLEvaluator where
 
 import BQLParser
-    ( Query,
+    ( Query(..),
       Statement(..),
       Exp(..),
-      BType(ArrayT, BoolT, IntT, StringT, AnyT),
+      BType(..),
       Value(..),
       Bop(..),
       Uop(..),
@@ -12,9 +12,10 @@ import BQLParser
       LValue(..),
       VarDecl(..),
       Block(..),
+      FDecl(..),
       expP, statementP, blockP, queryP, Uop (Neg), LValue )
 import Data.Map as Map
-    ( empty, findWithDefault, insert, lookup, Map )
+    ( empty, findWithDefault, insert, lookup, Map, fromAscList )
 import Control.Applicative
 import Control.Monad.Except
   ( ExceptT,
@@ -37,6 +38,8 @@ import Data.Maybe (isNothing, isJust)
 
 type KVStore = Map String (Map String TypedVal)
 type VarStore = Map String TypedVal
+type FunctionTable = Map String FDecl
+data Scope = Global | Local
 
 ----- Data type for storing typed values
 data TypedVal = Typed Value BType deriving (Show)
@@ -52,10 +55,11 @@ v `as` t = Typed v t
 data Store = St {
     locals :: VarStore,
     globals :: VarStore,
-    persist :: KVStore
+    persist :: KVStore,
+    fdecls :: FunctionTable
 } deriving (Show)
 emptyStore :: Store
-emptyStore = St {locals=Map.empty, globals=Map.empty, persist=Map.empty}
+emptyStore = St {locals=Map.empty, globals=Map.empty, persist=Map.empty, fdecls=Map.empty}
 
 type GetStoreFunc m = m VarStore
 type UpdateStoreFunc m = VarStore -> m ()
@@ -68,11 +72,26 @@ localUpdateStoreFunc v = do
     allVars <- get 
     put allVars {locals=v}
 
+scopedGet :: (MonadError String m, MonadState Store m) => Scope -> LValue -> m (Maybe TypedVal)
+scopedGet Global = getGlobal
+scopedGet Local = getLocal
+
+scopedSet :: (MonadError String m, MonadState Store m) => Scope -> LValue -> TypedVal -> m ()
+scopedSet Global = setGlobal
+scopedSet Local = setLocal
+
 getLocal :: (MonadError String m, MonadState Store m) => LValue -> m (Maybe TypedVal)
-getLocal = getVar localGetStoreFunc
+getLocal l = do
+    local <- getVar localGetStoreFunc l
+    global <- getVar globalGetStoreFunc l
+    return (local <|> global)
 
 setLocal :: (MonadError String m, MonadState Store m) => LValue -> TypedVal -> m ()
-setLocal = setVar localGetStoreFunc localUpdateStoreFunc
+setLocal loc v = do 
+    existsGlobal <- getVar globalGetStoreFunc loc
+    case existsGlobal of
+        Just x -> setVar globalGetStoreFunc globalUpdateStoreFunc loc v
+        Nothing -> setVar localGetStoreFunc localUpdateStoreFunc loc v
 
 globalGetStoreFunc :: (MonadError String m, MonadState Store m) => m VarStore
 globalGetStoreFunc = gets globals
@@ -242,7 +261,7 @@ evalBoolOpExp _ _ = error "Calling evalCompExp without comp exp"
 
 
 ----- Main logic for expression evaluation -----
-evalExp :: (MonadError String m, MonadState Store m) => Exp -> m TypedVal
+evalExp :: forall m. (MonadError String m, MonadState Store m) => Exp -> m TypedVal
 evalExp (Val v) = do
     case typeOf v of
         Just t -> return $ v `as` t
@@ -307,7 +326,31 @@ evalExp (UOp Not e) = do
         BoolVal v1' -> return $ BoolVal (not v1') `as` BoolT 
         _ -> error "Typeguard doesn't work as expected"
 
-evalExp (FCall name args) = undefined 
+evalExp (FCall name args) = do
+    allVars <- get
+    f@(FDecl name argDecls expectedRetType body) <- extractMaybeOrError 
+        (Map.lookup name (fdecls allVars)) 
+        ("No function " ++ name)
+    let prevLocals = locals allVars
+    let newScopedStore = allVars {locals=Map.empty} 
+    newScopedStore <- setParams (zip argDecls args)
+    put allVars {locals=newScopedStore}
+    ret <- evalBlock body Local
+    put allVars {locals=prevLocals}
+    case (ret, expectedRetType) of
+        (Just x@(Typed retVal retTy), _) -> return x
+        (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
+        (_, _) -> throwError ("Return type for " <> name <> "doesn't match return value")
+
+    where 
+    setParams :: [(VarDecl, Exp)] -> m VarStore
+    setParams [] = do return Map.empty
+    setParams ((VDecl vty vname, exp) : t) = do
+        e@(Typed eVal eTy) <- evalExp exp
+        typeGuard e vty "Argument type doesn't match function declaration"
+        rem <- setParams t
+        return $ Map.insert vname e rem
+        
 
 evalStrExp :: String -> Doc
 evalStrExp s =
@@ -321,24 +364,26 @@ evalStrExp s =
                 Right val -> pp val
 
 ----- Statement evaluation -----
-evalStatement :: (MonadError String m, MonadState Store m) => Statement -> m (Maybe TypedVal)
+evalStatement :: (MonadError String m, MonadState Store m) => Statement -> Scope -> m (Maybe TypedVal)
 
-evalStatement (Let v@(VDecl t name) exp) = do
-    exists <- getLocal (LVar name)
+evalStatement (Let v@(VDecl t name) exp) scope = do
+    exists <- scopedGet scope (LVar name)
     guardWithErrorMsg (isNothing exists) "Error: redeclaring variable"
     (Typed ev et) <- evalExp exp
     guardWithErrorMsg (t == et) ("Error: incorrect type in declaration for " ++ name) 
-    setLocal (LVar name) (ev `as` et)
+    scopedSet scope (LVar name) (ev `as` et)
     return Nothing
-
-evalStatement (Assign lval exp) = do
-    exists <- getLocal lval
+evalStatement (Assign lval exp) scope = do
+    exists <- scopedGet scope lval
     (Typed currentV expectedT) <- extractMaybeOrError exists "Error: assignment to undeclared variable"
     e <- evalExp exp
     typeGuard e expectedT "Error: Assignment must respect the use the same type"
-    setLocal lval e
+    scopedSet scope lval e
     return Nothing
-evalStatement _ = undefined
+evalStatement (Return exp) scope = do
+    tv <- evalExp exp
+    return $ Just tv 
+evalStatement (If {}) scope = undefined
 
 evalStrBlock :: String -> Doc
 evalStrBlock s =
@@ -346,7 +391,7 @@ evalStrBlock s =
     case res of
         Nothing -> PP.text "Parse error"
         Just (b, r) -> 
-            let (x, store) = runIdentity (runStateT (runExceptT (evalBlock b)) emptyStore) in
+            let (x, store) = runIdentity (runStateT (runExceptT (evalBlock b Global)) emptyStore) in
             case x of 
                 Left err -> PP.text err
                 Right val -> PP.text "Success"
@@ -357,17 +402,44 @@ evalStrBlockStore s =
     case res of
         Nothing -> error "Parse error"
         Just (b, r) -> 
-            let (x, store) = runIdentity (runStateT (runExceptT (evalBlock b)) emptyStore) in
+            let (x, store) = runIdentity (runStateT (runExceptT (evalBlock b Global)) emptyStore) in
             case x of 
                 Left err -> error err
                 Right val -> store
             
-
-evalBlock :: (MonadError String m, MonadState Store m) => Block -> m (Maybe TypedVal)
-evalBlock (Block []) = do return Nothing
-evalBlock (Block (h:t)) = do
-    evalStatement h
-    evalBlock $ Block t
+evalBlock :: (MonadError String m, MonadState Store m) => Block -> Scope -> m (Maybe TypedVal)
+evalBlock (Block []) scope = do return Nothing
+evalBlock (Block (h:t)) scope = do
+    res <- evalStatement h scope
+    case res of
+        Nothing -> evalBlock (Block t) scope
+        _ -> return res
 
 evalQuery :: (MonadError String m, MonadState Store m) => Query -> m (Maybe TypedVal)
-evalQuery = undefined
+evalQuery (Query fdecls main) = do
+    let ftable = Map.fromAscList (map (\f@(FDecl name _ _ _)-> (name, f)) fdecls)
+        initStore = emptyStore {fdecls=ftable} in
+        do 
+            put initStore
+            evalBlock main Global
+
+evalQueryStr :: String -> Doc
+evalQueryStr s =
+    let res = doParse queryP s in
+    case res of
+        Nothing -> PP.text "Parse error"
+        Just (q, r) -> 
+            let (x, store) = runIdentity (runStateT (runExceptT (evalQuery q)) emptyStore) in
+            case x of 
+                Left err -> PP.text err
+                Right Nothing -> PP.text "Success: void"
+                Right (Just result) -> PP.text "Success : " <> PP.parens (pp result)
+
+evalQueryStore :: String -> Store
+evalQueryStore s =
+    let res = doParse queryP s in
+    case res of
+        Nothing -> emptyStore
+        Just (q, r) -> 
+            let (x, store) = runIdentity (runStateT (runExceptT (evalQuery q)) emptyStore) in
+            store
