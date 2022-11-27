@@ -15,7 +15,7 @@ import Control.Applicative
 import Control.Monad.Except
   ( ExceptT,
     MonadError (throwError),
-    runExceptT,
+    runExceptT, guard,
   )
 import Control.Monad.Identity
   ( Identity (runIdentity),
@@ -194,6 +194,8 @@ evalExp (ArrInd arr' ind') = do
                 throwError "Index out of bounds"
             else
                 return (vals !! i `as` innerT)
+        (ArrayT _, _, _, _) -> throwError "Index must be an integer"
+        (_, _, IntT, _) -> throwError "Attempted index into non-array type"
         _ -> error "ERR: type system internal error"
 
 evalExp (ArrCons []) = do return (ArrayVal [] `as` ArrayT AnyT)
