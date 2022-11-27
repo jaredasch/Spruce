@@ -2,15 +2,19 @@ module BQLEvaluator where
 
 import BQLParser
     ( Query,
-      Statement,
+      Statement(..),
       Exp(..),
       BType(ArrayT, BoolT, IntT, StringT, AnyT),
       Value(..),
       Bop(..),
       Uop(..),
       PP(..),
-      expP, Uop (Neg) )
+      LValue(..),
+      VarDecl(..),
+      Block(..),
+      expP, statementP, blockP, queryP, Uop (Neg), LValue )
 import Data.Map as Map
+    ( empty, findWithDefault, insert, lookup, Map )
 import Control.Applicative
 import Control.Monad.Except
   ( ExceptT,
@@ -28,6 +32,7 @@ import Control.Monad.State
 import ParseLib (Parser(doParse))
 import Text.PrettyPrint (Doc, (<+>))
 import qualified Text.PrettyPrint as PP
+import Data.Maybe (isNothing, isJust)
 
 type KVStore = Map String (Map String TypedVal)
 type VarStore = Map String TypedVal
@@ -47,21 +52,52 @@ data Store = St {
     locals :: VarStore,
     globals :: VarStore,
     persist :: KVStore
-}
+} deriving (Show)
 emptyStore :: Store
 emptyStore = St {locals=Map.empty, globals=Map.empty, persist=Map.empty}
 
-getVar :: (MonadError String m, MonadState Store m) => String -> m (Maybe TypedVal)
-getVar name = do 
+getVar :: (MonadError String m, MonadState Store m) => LValue -> m (Maybe TypedVal)
+getVar (LVar name) = do 
     allVars <- get
     return (Map.lookup name (locals allVars) <|> 
             Map.lookup name (globals allVars))
+getVar (LArrInd arr' ind') = do
+    arrM <- getVar arr'
+    arr@(Typed arrV arrT) <- extractMaybeOrError arrM "Cannot resolve array"
+    typeGuardArr arr "Cannot index into non-array type"
+    ind@(Typed indV _) <- evalExp ind'
+    typeGuard ind IntT "Index type must be an integer"
+    case (arrV, indV, arrT) of
+        (ArrayVal vals, IntVal i, ArrayT innerT) -> return $ Just (vals !! i `as` innerT)
+        _ -> return Nothing
 
-setLocal :: (MonadError String m, MonadState Store m) => String -> TypedVal -> m ()
-setLocal name val = do
+setLocal :: (MonadError String m, MonadState Store m) => LValue -> TypedVal -> m ()
+setLocal (LVar name) val = do
     allVars <- get
     let updatedStore = allVars { locals = Map.insert name val (locals allVars)} in
-        put allVars
+        put updatedStore
+
+setLocal (LArrInd arr' ind') (Typed val valT) = do
+    arrM <- getVar arr'
+
+    arr@(Typed arrV arrT) <- extractMaybeOrError arrM "Cannot resolve variable"
+    ind@(Typed indV indT) <- evalExp ind'
+
+    typeGuard ind IntT "Index type must be an integer"
+    typeGuardArr arr "Cannot index into non-array type" 
+    guardWithErrorMsg (ArrayT valT == arrT) "Inserting element of wrong type into array"
+
+    case (arrV, indV) of
+        (ArrayVal vals, IntVal i) -> 
+            if i < 0 || length vals <= i then
+                throwError "Array index out of bounds"
+            else
+                setLocal arr' (ArrayVal (setAtIndex vals i val) `as` arrT)
+        _ -> error "ERR: Type system failure"
+    where 
+    -- | Credit to https://stackoverflow.com/questions/15530511/how-to-set-value-in-nth-element-in-a-haskell-list
+    setAtIndex :: [a] -> Int -> a -> [a]
+    setAtIndex l i v = Prelude.take i l ++ [v] ++ Prelude.drop (i + 1) l
 
 setGlobal :: (MonadError String m, MonadState Store m) => String -> TypedVal -> m ()
 setGlobal name val = do
@@ -86,7 +122,8 @@ setKV rowKey colKey val = do
     let updatedStore = allVars {persist=updatedKV}
     put updatedStore
 
------ Expression evaluation helper functions -----
+
+----- Error Handling and Type Checking -----
 typeOf :: Value -> Maybe BType
 typeOf (BoolVal _) = Just BoolT
 typeOf (IntVal _) = Just IntT
@@ -100,10 +137,25 @@ typeOf (ArrayVal (h:t)) = do
         ArrayT inner -> if inner == hType then Just tType else Nothing
         _ -> Nothing
 
+guardWithErrorMsg :: (MonadError String m, MonadState Store m) => Bool -> String -> m ()
+guardWithErrorMsg b m = do if b then return () else throwError m
+
+extractMaybeOrError :: (MonadError String m, MonadState Store m) => Maybe a -> String -> m a
+extractMaybeOrError x msg = do
+    case x of 
+        Nothing -> throwError msg
+        Just y -> return y
+
 typeGuard :: (MonadError String m, MonadState Store m) => TypedVal -> BType -> String -> m ()
 typeGuard _ AnyT m = do return ()
 typeGuard (Typed _ t) t' m = if t == t' then return () else throwError m
 
+typeGuardArr :: (MonadError String m, MonadState Store m) => TypedVal -> String -> m ()
+typeGuardArr (Typed _ (ArrayT _)) _ = do return ()
+typeGuardArr _ m = do throwError m
+
+
+----- Expression evaluation helper functions -----
 intBinOpToF :: Bop -> (Int -> Int -> Int)
 intBinOpToF Mult = (*)
 intBinOpToF Add = (+)
@@ -167,7 +219,7 @@ evalExp (Val v) = do
         Just t -> return $ v `as` t
         _ -> throwError $ "Type error" ++ show v
 evalExp (Var s) = do
-    var <- getVar s
+    var <- getVar (LVar s)
     case var of 
         Just v -> return v
         Nothing -> throwError $ "Use of undeclared variable " ++ s
@@ -239,8 +291,54 @@ evalStrExp s =
                 Left err -> PP.text err
                 Right val -> pp val
 
+----- Statement evaluation -----
 evalStatement :: (MonadError String m, MonadState Store m) => Statement -> m (Maybe TypedVal)
-evalStatement = undefined
+
+evalStatement (Let v@(VDecl t name) exp) = do
+    exists <- getVar (LVar name)
+    guardWithErrorMsg (isNothing exists) "Error: redeclaring variable"
+    (Typed ev et) <- evalExp exp
+    guardWithErrorMsg (t == et) ("Error: incorrect type in declaration for " ++ name) 
+    setLocal (LVar name) (ev `as` et)
+    return Nothing
+
+evalStatement (Assign lval exp) = do
+    exists <- getVar lval
+    (Typed currentV expectedT) <- extractMaybeOrError exists "Error: assignment to undeclared variable"
+    e <- evalExp exp
+    typeGuard e expectedT "Error: Assignment must respect the use the same type"
+    setLocal lval e
+    return Nothing
+evalStatement _ = undefined
+
+evalStrBlock :: String -> Doc
+evalStrBlock s =
+    let res = doParse blockP s in
+    case res of
+        Nothing -> PP.text "Parse error"
+        Just (b, r) -> 
+            let (x, store) = runIdentity (runStateT (runExceptT (evalBlock b)) emptyStore) in
+            case x of 
+                Left err -> PP.text err
+                Right val -> PP.text "Success"
+
+evalStrBlockStore :: String -> Store
+evalStrBlockStore s =
+    let res = doParse blockP s in
+    case res of
+        Nothing -> error "Parse error"
+        Just (b, r) -> 
+            let (x, store) = runIdentity (runStateT (runExceptT (evalBlock b)) emptyStore) in
+            case x of 
+                Left err -> error err
+                Right val -> store
+            
+
+evalBlock :: (MonadError String m, MonadState Store m) => Block -> m (Maybe TypedVal)
+evalBlock (Block []) = do return Nothing
+evalBlock (Block (h:t)) = do
+    evalStatement h
+    evalBlock $ Block t
 
 evalQuery :: (MonadError String m, MonadState Store m) => Query -> m (Maybe TypedVal)
 evalQuery = undefined

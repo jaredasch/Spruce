@@ -11,7 +11,7 @@ import qualified Text.PrettyPrint as PP
 import Data.List (intercalate)
 
 ----- Structure of BQL Query -----
-data Var = VDecl BType String deriving (Show)
+data VarDecl = VDecl BType String deriving (Show)
 data BType = 
     VoidT
   | BoolT
@@ -24,11 +24,11 @@ data BType =
 -- | The first argument contains all function declarations, the second is the main
 -- code to be executed
 data Query = Query [FDecl] Block deriving (Show)
-data FDecl = FDecl String [Var] Block deriving (Show)
+data FDecl = FDecl String [VarDecl] Block deriving (Show)
 newtype Block = Block [Statement] deriving (Show)
 data Statement =
-    Assign String Exp
-  | Let Var Exp
+    Assign LValue Exp
+  | Let VarDecl Exp
   | If Exp Block Block
   | Return Exp
   deriving (Show)
@@ -48,6 +48,11 @@ data Value =
   | IntVal Int
   | StringVal String
   | ArrayVal [Value]
+  deriving (Show)
+
+data LValue =
+    LVar String
+  | LArrInd LValue Exp
   deriving (Show)
       
 data Bop = 
@@ -212,6 +217,20 @@ expVarP = Var <$> varNameP
 expArrP :: Parser Exp
 expArrP = ArrCons <$> inBracketsP (P.sepBy expP (trimP (P.string ",")))
 
+lvalP :: Parser LValue
+lvalP = process <$> first <*> rest where
+  process :: LValue -> [Exp] -> LValue
+  process = foldl comb 
+
+  comb :: LValue -> Exp -> LValue
+  comb = LArrInd
+
+  first :: Parser LValue
+  first = LVar <$> varNameP
+
+  rest :: Parser [Exp]
+  rest = many $ inBracketsP expP
+
 ----- Statement/Block Parsing -----
 blockP :: Parser Block
 blockP = Block <$> many statementP
@@ -222,14 +241,14 @@ statementP = letP <|> assignP <|> returnP <|> ifP
 varNameP :: Parser String
 varNameP = (:) <$> P.alpha <*> many (P.alpha <|> P.digit)
 
-typedVarP :: Parser Var
+typedVarP :: Parser VarDecl
 typedVarP = flip VDecl <$> varNameP <*> (trimP (P.string ":") *> typeP)
 
 letP :: Parser Statement
 letP = Let <$> (trimP (P.string "let ") *> typedVarP) <*> (trimP (P.string "=") *> expP) <* trimP (P.string ";")
 
 assignP :: Parser Statement
-assignP = Assign <$> varNameP <*> (trimP (P.string "=") *> expP) <* trimP (P.string ";")
+assignP = Assign <$> trimP lvalP <*> (trimP (P.string "=") *> expP) <* trimP (P.string ";")
 
 returnP :: Parser Statement 
 returnP = Return <$> (trimP (P.string "return ") *> expP) <* trimP (P.string ";")
@@ -304,6 +323,10 @@ instance PP Value where
     joinBy :: Doc -> [Doc] -> Doc
     joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
 
+instance PP LValue where
+  pp (LVar s) = PP.text s
+  pp (LArrInd arr ind) = pp arr <> PP.brackets (pp ind)
+
 instance PP Exp where
   pp (Val v) = pp v
   pp (Var s) = PP.text s
@@ -317,11 +340,11 @@ instance PP Exp where
     joinBy :: Doc -> [Doc] -> Doc
     joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
 
-instance PP Var where
+instance PP VarDecl where
   pp (VDecl t n) = pp t <+> PP.char ':' <+> PP.text n
 
 instance PP Statement where
-  pp (Assign s e) = (PP.text s <+> PP.char '=' <+> pp e) <> PP.char ';'
+  pp (Assign s e) = (pp s <+> PP.char '=' <+> pp e) <> PP.char ';'
   pp (Let v e) = (pp v <+> PP.char '=' <+> pp e) <> PP.char ';'
   pp (If e b1 (Block [])) = 
     PP.text "if" <> PP.parens (pp e) <> PP.text " {" PP.$$
