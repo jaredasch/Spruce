@@ -15,7 +15,7 @@ import BQLParser
       FDecl(..),
       expP, statementP, blockP, queryP, Uop (Neg), LValue )
 import Data.Map as Map
-    ( empty, findWithDefault, insert, lookup, Map, fromAscList )
+    ( empty, findWithDefault, insert, lookup, Map, fromAscList, delete )
 import Control.Applicative
 import Control.Monad.Except
   ( ExceptT,
@@ -85,6 +85,10 @@ scopedSet :: (MonadError String m, MonadState Store m) => Scope -> LValue -> Typ
 scopedSet Global = setGlobal
 scopedSet Local = setLocal
 
+scopedRemove :: (MonadError String m, MonadState Store m) => Scope -> LValue -> m ()
+scopedRemove Global = removeVar globalGetStoreFunc globalUpdateStoreFunc
+scopedRemove Local = removeVar localGetStoreFunc localUpdateStoreFunc
+
 getLocal :: (MonadError String m, MonadState Store m) => LValue -> m (Maybe TypedVal)
 getLocal l = do
     local <- getVar localGetStoreFunc l
@@ -113,6 +117,13 @@ setGlobal :: (MonadError String m, MonadState Store m) => LValue -> TypedVal -> 
 setGlobal = setVar globalGetStoreFunc globalUpdateStoreFunc
 
 ----- Internal functions for setting/getting over an arbitrary VarStore -----
+removeVar :: (MonadError String m, MonadState Store m) => GetStoreFunc m -> UpdateStoreFunc m -> LValue -> m ()
+removeVar getS updateS (LVar name) = do
+    store <- getS
+    updateS (Map.delete name store)
+    
+removeVar _ _ _ = error "Cannot remove arbitrary array variables" 
+
 getVar :: (MonadError String m, MonadState Store m) => GetStoreFunc m -> LValue -> m (Maybe TypedVal)
 getVar getS (LVar name) = do 
     store <- getS
@@ -440,7 +451,31 @@ evalStatement (While exp body) scope = do
                     Just x -> return $ Just x 
             else return Nothing  
         _ -> error "ERR: Type system internal error"
+evalStatement (ForIn vdecl@(VDecl t n) exp body) scope = do
+    v@(Typed expV expT) <- evalExp exp
+    currentIterBind <- scopedGet scope (LVar n)
+    case (expT, expV) of
+        (ArrayT innerT, ArrayVal vals) -> 
+            if t /= innerT then 
+                throwError "Error: Variable delcaration in for-each doesn't match expression"
+            else if Maybe.isJust currentIterBind then 
+                throwError "Error: Bound variable in for-each loop already exists in scope"
+            else 
+                execForEach vdecl vals body
+        _ -> throwError "Error: cannot iterate over non-array type" 
 
+    where 
+
+    execForEach :: (MonadError String m, MonadState Store m) => VarDecl -> [Value] -> Block -> m (Maybe TypedVal)
+    execForEach vd@(VDecl iterType iterName) (h:t) body = do
+        scopedSet scope (LVar iterName) (h `as` iterType)
+        res <- evalBlock body scope
+        scopedRemove scope (LVar iterName)
+        case res of
+            Nothing -> execForEach vd t body
+            Just x -> return (Just x)
+    execForEach _ [] _ = do return Nothing
+ 
 evalStrBlock :: String -> Doc
 evalStrBlock s =
     let res = doParse blockP s in
@@ -487,6 +522,7 @@ libFuncLookup "exists" = Just libExistsKV
 libFuncLookup "appendFront" = Just libAppendFront
 libFuncLookup "appendBack" = Just libAppendBack
 libFuncLookup "len" = Just libArrayLen
+libFuncLookup "range" = Just libRange
 libFuncLookup x = Nothing
 
 guardTypes :: (MonadError String m, MonadState Store m) => [TypedVal] -> [BType] -> String -> m ()
@@ -549,6 +585,14 @@ libArrayLen args = do
     let (Typed v1 t1) = args !! 0
     case (t1, v1) of
         (ArrayT innerT, ArrayVal vals) -> return $ IntVal (length vals) `as` IntT 
+        _ -> throwError "ERR: Type system internal failure"
+
+libRange :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
+libRange args = do
+    guardTypes args [IntT] "range"
+    let (Typed v1 t1) = args !! 0
+    case (t1, v1) of
+        (IntT, IntVal i) -> return $ (ArrayVal (IntVal <$> take i [0 ..]) `as` ArrayT IntT)
         _ -> throwError "ERR: Type system internal failure"
 
 ----- Helper functions for testing -----

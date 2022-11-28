@@ -33,6 +33,7 @@ data Statement =
   | Return Exp
   | FCallStatement String [Exp]
   | While Exp Block
+  | ForIn VarDecl Exp Block
   deriving (Show)
 
 data Exp = 
@@ -241,7 +242,7 @@ blockP :: Parser Block
 blockP = Block <$> many statementP
 
 statementP :: Parser Statement
-statementP = letP <|> assignP <|> returnP <|> ifP <|> fCallStatementP <|> whileP
+statementP = letP <|> assignP <|> returnP <|> ifP <|> fCallStatementP <|> whileP <|> forInP
 
 varNameP :: Parser String
 varNameP = (:) <$> P.alpha <*> many (P.alpha <|> P.digit)
@@ -262,6 +263,12 @@ whileP :: Parser Statement
 whileP = While <$>
   (trimP (P.string "while") *> trimP (inParensP expP))
   <*> inBracesP blockP 
+
+forInP :: Parser Statement
+forInP = ForIn <$>
+  (trimP (P.string "for") *> trimP (P.string "(") *> trimP typedVarP <* trimP (P.string "in ")) <*> 
+  (expP <* trimP(P.string ")")) <*>
+  trimP (inBracesP blockP)
 
 ifP :: Parser Statement
 ifP = If <$>
@@ -359,7 +366,7 @@ instance PP Exp where
     joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
 
 instance PP VarDecl where
-  pp (VDecl t n) = pp t <+> PP.char ':' <+> PP.text n
+  pp (VDecl t n) = PP.text n <+> PP.char ':' <+> pp t
 
 instance PP Statement where
   pp (Assign s e) = (pp s <+> PP.char '=' <+> pp e) <> PP.char ';'
@@ -377,6 +384,10 @@ instance PP Statement where
     joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
   pp (While exp body) = PP.text "while " <> PP.parens (pp exp)  <> PP.text " {" PP.$$
     PP.nest 4 (pp body) PP.$$
+    PP.text "}"
+  pp (ForIn vdecl exp body) =
+    PP.text "for " <> PP.parens (pp vdecl <> PP.text " in " <> pp exp) <> PP.text " {" PP.$$
+    PP.nest 4 (pp body) PP.$$ 
     PP.text "}"
 
 instance PP FDecl where
