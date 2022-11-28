@@ -486,6 +486,7 @@ libFuncLookup "set" = Just libSetKV
 libFuncLookup "exists" = Just libExistsKV
 libFuncLookup "appendFront" = Just libAppendFront
 libFuncLookup "appendBack" = Just libAppendBack
+libFuncLookup "len" = Just libArrayLen
 libFuncLookup x = Nothing
 
 guardTypes :: (MonadError String m, MonadState Store m) => [TypedVal] -> [BType] -> String -> m ()
@@ -540,7 +541,15 @@ libAppendBack args = do
         (t, ArrayT t', toAppend, ArrayVal vals) -> do
             typeGuard t t' "Error: append must respect array type"
             return $ ArrayVal (vals ++ [toAppend]) `as` ArrayT t1
-        _ -> throwError "e"
+        _ -> throwError "ERR: Type system internal failure"
+
+libArrayLen :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
+libArrayLen args = do
+    guardTypes args [ArrayT AnyT] "len"
+    let (Typed v1 t1) = args !! 0
+    case (t1, v1) of
+        (ArrayT innerT, ArrayVal vals) -> return $ IntVal (length vals) `as` IntT 
+        _ -> throwError "ERR: Type system internal failure"
 
 ----- Helper functions for testing -----
 
