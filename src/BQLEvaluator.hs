@@ -36,6 +36,7 @@ import Text.PrettyPrint (Doc, (<+>))
 import qualified Text.PrettyPrint as PP
 import Data.Maybe (isNothing, isJust)
 import qualified Data.Maybe as Maybe
+import qualified ParseLib as P
 
 type KVStore = Map String (Map String TypedVal)
 type VarStore = Map String TypedVal
@@ -46,11 +47,14 @@ data Scope = Global | Local
 data TypedVal = Typed Value BType deriving (Show)
 
 instance PP TypedVal where
-    pp (Typed t v) = pp v <> PP.text " : " <> pp t 
+    pp (Typed v t) = pp v <> PP.text " : " <> pp t 
 
 infixl 9 `as`
 as :: Value -> BType -> TypedVal
 v `as` t = Typed v t
+
+typeof :: TypedVal -> BType
+typeof (Typed v t) = t
 
 ----- Code executes against a function-local scope, global scope, and persistent KV-store
 data Store = St {
@@ -118,8 +122,8 @@ getVar getS (LArrInd arr' ind') = do
     arrM <- getVar getS arr'
     arr@(Typed arrV arrT) <- extractMaybeOrError arrM "Cannot resolve array"
     typeGuardArr arr "Cannot index into non-array type"
-    ind@(Typed indV _) <- evalExp ind'
-    typeGuard ind IntT "Index type must be an integer"
+    ind@(Typed indV indT) <- evalExp ind'
+    typeGuard indT IntT "Index type must be an integer"
     case (arrV, indV, arrT) of
         (ArrayVal vals, IntVal i, ArrayT innerT) -> return $ Just (vals !! i `as` innerT)
         _ -> return Nothing
@@ -136,7 +140,7 @@ setVar getS updateS (LArrInd arr' ind') (Typed val valT) = do
     arr@(Typed arrV arrT) <- extractMaybeOrError arrM "Cannot resolve variable"
     ind@(Typed indV indT) <- evalExp ind'
 
-    typeGuard ind IntT "Index type must be an integer"
+    typeGuard indT IntT "Index type must be an integer"
     typeGuardArr arr "Cannot index into non-array type" 
     guardWithErrorMsg (ArrayT valT == arrT) "Inserting element of wrong type into array"
 
@@ -202,9 +206,11 @@ extractMaybeOrError x msg = do
         Nothing -> throwError msg
         Just y -> return y
 
-typeGuard :: (MonadError String m, MonadState Store m) => TypedVal -> BType -> String -> m ()
+-- | Checks that the first type is a subtype of the second (equality except for AnyT case)
+typeGuard :: (MonadError String m, MonadState Store m) => BType -> BType -> String -> m ()
 typeGuard _ AnyT m = do return ()
-typeGuard (Typed _ t) t' m = if t == t' then return () else throwError m
+typeGuard (ArrayT t) (ArrayT t') m = typeGuard t t' m
+typeGuard t t' m = if t == t' then return () else throwError m
 
 typeGuardArr :: (MonadError String m, MonadState Store m) => TypedVal -> String -> m ()
 typeGuardArr (Typed _ (ArrayT _)) _ = do return ()
@@ -236,10 +242,10 @@ boolOpToF _ = error "ERR: Calling boolOpToF with non-bool op"
 
 evalBinopIntExp :: (MonadError String m, MonadState Store m) => Exp -> String -> m TypedVal
 evalBinopIntExp (BOp op e1 e2) opName = do
-    e1'@(Typed v1 _) <- evalExp e1
-    typeGuard e1' IntT ("Arguments for " <> opName <> " must be integers")
-    e2'@(Typed v2 _) <- evalExp e2
-    typeGuard e2' IntT ("Arguments for " <> opName <> " must be integers")
+    e1'@(Typed v1 t1) <- evalExp e1
+    typeGuard t1 IntT ("Arguments for " <> opName <> " must be integers")
+    e2'@(Typed v2 t2) <- evalExp e2
+    typeGuard t2 IntT ("Arguments for " <> opName <> " must be integers")
     case (v1, v2) of
         (IntVal v1', IntVal v2') -> return $ IntVal (intBinOpToF op v1' v2') `as` IntT 
         _ -> error "Typeguard doesn't work as expected"
@@ -247,10 +253,10 @@ evalBinopIntExp _ _ = error "Calling evalBinop without binop exp"
 
 evalCompExp :: (MonadError String m, MonadState Store m) => Exp -> String -> m TypedVal
 evalCompExp (BOp op e1 e2) opName = do
-    e1'@(Typed v1 _) <- evalExp e1
-    typeGuard e1' IntT ("Arguments for " <> opName <> " must be integers")
-    e2'@(Typed v2 _) <- evalExp e2
-    typeGuard e2' IntT ("Arguments for " <> opName <> " must be integers")
+    e1'@(Typed v1 t1) <- evalExp e1
+    typeGuard t1 IntT ("Arguments for " <> opName <> " must be integers")
+    e2'@(Typed v2 t2) <- evalExp e2
+    typeGuard t2 IntT ("Arguments for " <> opName <> " must be integers")
     case (v1, v2) of
         (IntVal v1', IntVal v2') -> return $ BoolVal (intCompToF op v1' v2') `as` BoolT 
         _ -> error "Typeguard doesn't work as expected"
@@ -258,10 +264,10 @@ evalCompExp _ _ = error "Calling evalCompExp without comp exp"
 
 evalBoolOpExp :: (MonadError String m, MonadState Store m) => Exp -> String -> m TypedVal
 evalBoolOpExp (BOp op e1 e2) opName = do
-    e1'@(Typed v1 _) <- evalExp e1
-    typeGuard e1' BoolT ("Arguments for " <> opName <> " must be booleans")
-    e2'@(Typed v2 _) <- evalExp e2
-    typeGuard e2' BoolT ("Arguments for " <> opName <> " must be booleans")
+    e1'@(Typed v1 t1) <- evalExp e1
+    typeGuard t1 BoolT ("Arguments for " <> opName <> " must be booleans")
+    e2'@(Typed v2 t2) <- evalExp e2
+    typeGuard t2 BoolT ("Arguments for " <> opName <> " must be booleans")
     case (v1, v2) of
         (BoolVal v1', BoolVal v2') -> return $ BoolVal (boolOpToF op v1' v2') `as` BoolT 
         _ -> error "Typeguard doesn't work as expected"
@@ -322,34 +328,18 @@ evalExp (ArrCons (h:t)) = do
         _ -> error "ERR: Type system internal error"
     
 evalExp (UOp Neg e) = do
-    e1'@(Typed v1 _) <- evalExp e
-    typeGuard e1' IntT "Argument for negation must be an integer"
+    e1'@(Typed v1 t1) <- evalExp e
+    typeGuard t1 IntT "Argument for negation must be an integer"
     case v1 of
         IntVal v1' -> return $ IntVal (-v1') `as` IntT 
         _ -> error "Typeguard doesn't work as expected"
 
 evalExp (UOp Not e) = do
-    e1'@(Typed v1 _) <- evalExp e
-    typeGuard e1' BoolT "Argument for not must be a boolean"
+    e1'@(Typed v1 t1) <- evalExp e
+    typeGuard t1 BoolT "Argument for not must be a boolean"
     case v1 of
         BoolVal v1' -> return $ BoolVal (not v1') `as` BoolT 
         _ -> error "Typeguard doesn't work as expected"
-
-    -- allVars <- get
-    -- f@(FDecl name argDecls expectedRetType body) <- extractMaybeOrError 
-    --     (Map.lookup name (fdecls allVars)) 
-    --     ("No function " ++ name)
-    -- let prevLocals = locals allVars
-    -- let newScopedStore = allVars {locals=Map.empty} 
-    -- newScopedStore <- setParams (zip argDecls args)
-    -- put allVars {locals=newScopedStore}
-    -- ret <- evalBlock body Local
-    -- put allVars {locals=prevLocals}
-    -- case (ret, expectedRetType) of
-    --     (Just x@(Typed retVal retTy), _) -> return x
-    --     (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
-    --     (_, _) -> throwError ("Return type for " <> name <> "doesn't match return value")
-
 
 evalExp (FCall name args) = 
     case libFuncLookup name of 
@@ -377,7 +367,7 @@ execUserFunc name args = do
     setParams [] [] = do return Map.empty
     setParams ((VDecl vty vname):declT) (exp:expT) = do
         e@(Typed eVal eTy) <- evalExp exp
-        typeGuard e vty "Argument type doesn't match function declaration"
+        typeGuard eTy vty "Argument type doesn't match function declaration"
         rem <- setParams declT expT
         return $ Map.insert vname e rem
     setParams _ _ = do throwError ("Argument mismatch in call to " <> name)
@@ -418,7 +408,7 @@ evalStatement (Assign lval exp) scope = do
     exists <- scopedGet scope lval
     (Typed currentV expectedT) <- extractMaybeOrError exists "Error: assignment to undeclared variable"
     e <- evalExp exp
-    typeGuard e expectedT "Error: Assignment must respect the use the same type"
+    typeGuard (typeof e) expectedT "Error: Assignment must respect the use the same type"
     scopedSet scope lval e
     return Nothing
 evalStatement (Return exp) scope = do
@@ -426,11 +416,11 @@ evalStatement (Return exp) scope = do
     return $ Just tv 
 evalStatement (FCallStatement name args) scope = do
     e <- evalExp (FCall name args)
-    typeGuard e VoidT "Calling function as statement with non-void return type"
+    typeGuard (typeof e) VoidT "Calling function as statement with non-void return type"
     return Nothing
 evalStatement (If exp b1 b2) scope = do
     e <- evalExp exp
-    typeGuard e BoolT "If-else expression guard must be of type bool"
+    typeGuard (typeof e) BoolT "If-else expression guard must be of type bool"
     case e of 
         Typed (BoolVal b) BoolT -> 
             if b then
@@ -440,7 +430,7 @@ evalStatement (If exp b1 b2) scope = do
         _ -> error "ERR: Type system internal error"
 evalStatement (While exp body) scope = do
     e@(Typed expV expT) <- evalExp exp
-    typeGuard e BoolT "Error: guard of while loop must be boolean type"
+    typeGuard (typeof e) BoolT "Error: guard of while loop must be boolean type"
     case expV of
         BoolVal b -> 
             if b then do
@@ -494,12 +484,14 @@ libFuncLookup :: (MonadError String m, MonadState Store m) => String -> Maybe ([
 libFuncLookup "get" = Just libGetKV
 libFuncLookup "set" = Just libSetKV
 libFuncLookup "exists" = Just libExistsKV
+libFuncLookup "appendFront" = Just libAppendFront
+libFuncLookup "appendBack" = Just libAppendBack
 libFuncLookup x = Nothing
 
 guardTypes :: (MonadError String m, MonadState Store m) => [TypedVal] -> [BType] -> String -> m ()
 guardTypes [] [] fname = do return ()
-guardTypes (valH:valT) (tyH:tyT) fname = do
-    typeGuard valH tyH ("Mismatched type in function call for " ++ fname)
+guardTypes ((Typed v t):valT) (tyH:tyT) fname = do
+    typeGuard t tyH ("Mismatched type in function call for " ++ fname)
     guardTypes valT tyT fname
 guardTypes _ _ fname = do throwError ("Mismatched number of arguments in " ++ fname)
 
@@ -528,15 +520,38 @@ libExistsKV args = do
             return (BoolVal exists `as` BoolT)
         _ -> error "ERR: Type system internal error"
 
------ Helper function for testing -----
-evalQueryStr :: String -> Doc
-evalQueryStr s =
-    let res = doParse queryP s in
-    case res of
-        Nothing -> PP.text "Parse error"
-        Just (q, r) -> 
-            let (x, store) = runIdentity (runStateT (runExceptT (evalQuery q)) emptyStore) in
-            case x of 
-                Left err -> PP.text err
-                Right Nothing -> PP.text "Success: void"
-                Right (Just result) -> PP.text "Success : " <> PP.parens (pp result)
+libAppendFront :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
+libAppendFront args = do
+    guardTypes args [AnyT, ArrayT AnyT] "appendFront"
+    let (Typed v1 t1) = args !! 0
+        (Typed v2 t2) = args !! 1
+    case (t1, t2, v1, v2) of
+        (t, ArrayT t', toAppend, ArrayVal vals) -> do
+            typeGuard t t' "Error: append must respect array type"
+            return $ ArrayVal (toAppend : vals) `as` ArrayT t1
+        _ -> throwError "e"
+
+libAppendBack :: (MonadError String m, MonadState Store m) => [TypedVal] -> m TypedVal
+libAppendBack args = do
+    guardTypes args [AnyT, ArrayT AnyT] "appendFront"
+    let (Typed v1 t1) = args !! 0
+        (Typed v2 t2) = args !! 1
+    case (t1, t2, v1, v2) of
+        (t, ArrayT t', toAppend, ArrayVal vals) -> do
+            typeGuard t t' "Error: append must respect array type"
+            return $ ArrayVal (vals ++ [toAppend]) `as` ArrayT t1
+        _ -> throwError "e"
+
+----- Helper functions for testing -----
+
+evalQueryFile :: String -> IO ()
+evalQueryFile fname = do
+    parseResM <- P.parseFromFile queryP fname
+    case parseResM of
+        Left err -> print err 
+        Right p ->
+            let (evalRes, store) = runIdentity (runStateT (runExceptT (evalQuery p)) emptyStore) in
+            case evalRes of
+                Left err -> print err
+                Right (Just res) -> print (pp res)
+                _ -> print "success: no return type"

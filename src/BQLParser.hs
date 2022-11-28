@@ -265,7 +265,7 @@ whileP = While <$>
 
 ifP :: Parser Statement
 ifP = If <$>
-  (P.string "if" *> inParensP expP) <*>
+  (trimP (P.string "if") *> inParensP expP) <*>
   trimP (inBracesP blockP) <*>
   ( trimP (P.string "else" *> trimP (inBracesP blockP)) <|> pure (Block []))
 
