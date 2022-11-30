@@ -1,0 +1,13 @@
+set("row", "col", 11);
+
+let sum : int = 0;
+
+func add (x : int, y : int) -> int {
+    return x + y;
+}
+
+for(i : int in range(get("row", "col"))) {
+    sum = add(sum, i);
+}
+
+return sum;

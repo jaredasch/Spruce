@@ -89,7 +89,6 @@ library
       ParseLib
       BQLParser
       BQLEvaluator
-      BQLFunctions
   hs-source-dirs:
       src
   default-language: Haskell2010
@@ -111,8 +110,12 @@ test-suite project-cis5520-test
       common-stanza
   type: 
       exitcode-stdio-1.0
-  main-is: 
-      Spec.hs
+  exposed-modules:
+      ParserTests
+  other-modules:
+      ParserTests
+  main-is:
+      Main.hs
   hs-source-dirs:
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
