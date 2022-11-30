@@ -50,21 +50,19 @@ import ParseLib qualified as P
 import Text.PrettyPrint (Doc, (<+>))
 import Text.PrettyPrint qualified as PP
 
+-- Map type for row-column-based key-value store
 type KVStore = Map String (Map String TypedVal)
 
+-- Map type for local/global variables
 type VarStore = Map String TypedVal
 
+-- Function table to store user-defined functions
 type FunctionTable = Map String FDecl
 
 data Scope = Global | Local
 
------ Data type for storing typed values
-data TypedVal = Typed Value BType deriving (Show)
-
-instance PP TypedVal where
-  pp (Typed v t) = pp v <> PP.text " : " <> pp t
-
-infixl 9 `as`
+-- Data type for storing typed values
+data TypedVal = Typed Value BType deriving (Show, Eq)
 
 as :: Value -> BType -> TypedVal
 v `as` t = Typed v t
@@ -72,7 +70,11 @@ v `as` t = Typed v t
 typeof :: TypedVal -> BType
 typeof (Typed v t) = t
 
------ Code executes against a function-local scope, global scope, and persistent KV-store
+instance PP TypedVal where
+  pp (Typed v t) = pp v <> PP.text " : " <> pp t
+
+-- Code executes against a function-local scope, global scope, and persistent
+-- KV-store, and must also track user function definitions
 data Store = St
   { locals :: VarStore,
     globals :: VarStore,
@@ -84,6 +86,7 @@ data Store = St
 emptyStore :: Store
 emptyStore = St {locals = Map.empty, globals = Map.empty, persist = Map.empty, fdecls = Map.empty}
 
+-- Some abstractions that allow for code re-use between local and global variable stores
 type GetStoreFunc m = m VarStore
 
 type UpdateStoreFunc m = VarStore -> m ()
@@ -135,7 +138,7 @@ getGlobal = getVar globalGetStoreFunc
 setGlobal :: (MonadError String m, MonadState Store m) => LValue -> TypedVal -> m ()
 setGlobal = setVar globalGetStoreFunc globalUpdateStoreFunc
 
------ Internal functions for setting/getting over an arbitrary VarStore -----
+-- Internal functions for setting/getting over an arbitrary VarStore
 removeVar :: (MonadError String m, MonadState Store m) => GetStoreFunc m -> UpdateStoreFunc m -> LValue -> m ()
 removeVar getS updateS (LVar name) = do
   store <- getS
@@ -185,7 +188,7 @@ setVar getS updateS (LArrInd arr' ind') (Typed val valT) = do
     setAtIndex :: [a] -> Int -> a -> [a]
     setAtIndex l i v = Prelude.take i l ++ [v] ++ Prelude.drop (i + 1) l
 
------ Get/Set internal functions for KV store -----
+-- Get/Set internal functions for KV store
 getKV :: (MonadError String m, MonadState Store m) => String -> String -> m TypedVal
 getKV rowKey colKey = do
   allVars <- get
@@ -211,7 +214,7 @@ existsKV rowKey colKey = do
         Map.lookup colKey row
   return (Maybe.isJust resM)
 
------ Error Handling and Type Checking -----
+-- Error Handling and Type Checking
 typeOf :: Value -> Maybe BType
 typeOf (BoolVal _) = Just BoolT
 typeOf (IntVal _) = Just IntT
@@ -234,7 +237,7 @@ extractMaybeOrError x msg = do
     Nothing -> throwError msg
     Just y -> return y
 
--- | Checks that the first type is a subtype of the second (equality except for AnyT case)
+-- Checks that the first type is a subtype of the second (equality except for AnyT case)
 typeGuard :: (MonadError String m, MonadState Store m) => BType -> BType -> String -> m ()
 typeGuard _ AnyT m = do return ()
 typeGuard (ArrayT t) (ArrayT t') m = typeGuard t t' m
@@ -244,7 +247,7 @@ typeGuardArr :: (MonadError String m, MonadState Store m) => TypedVal -> String 
 typeGuardArr (Typed _ (ArrayT _)) _ = do return ()
 typeGuardArr _ m = do throwError m
 
------ Expression evaluation helper functions -----
+-- Expression evaluation helper functions
 intBinOpToF :: Bop -> (Int -> Int -> Int)
 intBinOpToF Mult = (*)
 intBinOpToF Add = (+)
@@ -300,7 +303,7 @@ evalBoolOpExp (BOp op e1 e2) opName = do
     _ -> error "Typeguard doesn't work as expected"
 evalBoolOpExp _ _ = error "Calling evalCompExp without comp exp"
 
------ Main logic for expression evaluation -----
+-- Main logic for expression evaluation
 evalExp :: forall m. (MonadError String m, MonadState Store m) => Exp -> m TypedVal
 evalExp (Val v) = do
   case typeOf v of
@@ -403,18 +406,7 @@ execLibFunc f args = do
       rem <- acc
       return (val : rem)
 
-evalStrExp :: String -> Doc
-evalStrExp s =
-  let res = doParse expP s
-   in case res of
-        Nothing -> PP.text "Parse error"
-        Just (e, r) ->
-          let x = fst $ runIdentity (runStateT (runExceptT (evalExp e)) emptyStore)
-           in case x of
-                Left err -> PP.text err
-                Right val -> pp val
-
------ Statement evaluation -----
+-- Statement evaluation
 evalStatement :: (MonadError String m, MonadState Store m) => Statement -> Scope -> m (Maybe TypedVal)
 evalStatement (Let v@(VDecl t name) exp) scope = do
   exists <- scopedGet scope (LVar name)
@@ -482,28 +474,6 @@ evalStatement (ForIn vdecl@(VDecl t n) exp body) scope = do
         Just x -> return (Just x)
     execForEach _ [] _ = do return Nothing
 
-evalStrBlock :: String -> Doc
-evalStrBlock s =
-  let res = doParse blockP s
-   in case res of
-        Nothing -> PP.text "Parse error"
-        Just (b, r) ->
-          let (x, store) = runIdentity (runStateT (runExceptT (evalBlock b Global)) emptyStore)
-           in case x of
-                Left err -> PP.text err
-                Right val -> PP.text "Success"
-
-evalStrBlockStore :: String -> Store
-evalStrBlockStore s =
-  let res = doParse blockP s
-   in case res of
-        Nothing -> error "Parse error"
-        Just (b, r) ->
-          let (x, store) = runIdentity (runStateT (runExceptT (evalBlock b Global)) emptyStore)
-           in case x of
-                Left err -> error err
-                Right val -> store
-
 evalBlock :: (MonadError String m, MonadState Store m) => Block -> Scope -> m (Maybe TypedVal)
 evalBlock (Block []) scope = do return Nothing
 evalBlock (Block (h : t)) scope = do
@@ -520,7 +490,7 @@ evalQuery (Query fdecls main) = do
         put initStore
         evalBlock main Global
 
------ Library Functions -----
+-- Library Functions
 libFuncLookup :: (MonadError String m, MonadState Store m) => String -> Maybe ([TypedVal] -> m TypedVal)
 libFuncLookup "get" = Just libGetKV
 libFuncLookup "set" = Just libSetKV
@@ -602,6 +572,17 @@ libRange args = do
     _ -> throwError "ERR: Type system internal failure"
 
 ----- Helper functions for testing -----
+evalStrExp :: String -> Doc
+evalStrExp s =
+  let res = doParse expP s
+   in case res of
+        Nothing -> PP.text "Parse error"
+        Just (e, r) ->
+          let x = fst $ runIdentity (runStateT (runExceptT (evalExp e)) emptyStore)
+           in case x of
+                Left err -> PP.text err
+                Right val -> pp val
+
 evalQueryFile :: String -> IO (Either String (Maybe TypedVal))
 evalQueryFile fname = do
   parseResM <- P.parseFromFile queryP fname

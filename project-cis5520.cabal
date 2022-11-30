@@ -112,8 +112,10 @@ test-suite project-cis5520-test
       exitcode-stdio-1.0
   exposed-modules:
       ParserTests
+      EvaluatorTests
   other-modules:
       ParserTests
+      EvaluatorTests
   main-is:
       Main.hs
   hs-source-dirs:
