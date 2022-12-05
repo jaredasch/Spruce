@@ -1,0 +1,9 @@
+let sum : int = 0;
+let nums : [int] = [];
+
+for (i : int in range(5)) {
+    sum = sum + i;
+    nums = appendBack(sum, nums);
+}
+
+return nums;

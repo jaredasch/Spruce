@@ -1,0 +1,8 @@
+let a : int = 4;
+
+func setA (x : int) -> void {
+    a = x;
+}
+
+setA(2);
+return a;

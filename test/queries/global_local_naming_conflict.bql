@@ -1,0 +1,8 @@
+let a : int = 4;
+
+func badScope (x : int) -> int {
+    let a : int = x;
+    return a;
+}
+
+return badScope(2);

@@ -1,0 +1,15 @@
+let a : int = 5;
+let b : int = 10;
+let c : bool = true;
+let d : int = 15;
+
+func sum (arr : [int]) -> int {
+    let s : int = 0;
+    for (i : int in arr) {
+        s = s + i;
+    }
+    return s;
+}
+
+let array : [int] = [a, b, c, d];
+return sum(array);

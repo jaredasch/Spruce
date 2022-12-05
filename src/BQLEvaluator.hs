@@ -380,7 +380,8 @@ execUserFunc name args = do
   newScopedStore <- setParams argDecls args
   put allVars {locals = newScopedStore}
   ret <- evalBlock body Local
-  put allVars {locals = prevLocals}
+  allVarsUpdated <- get
+  put allVarsUpdated {locals = prevLocals}
   case (ret, expectedRetType) of
     (Just x@(Typed retVal retTy), _) -> return x
     (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
@@ -412,8 +413,8 @@ evalStatement (Let v@(VDecl t name) exp) scope = do
   exists <- scopedGet scope (LVar name)
   guardWithErrorMsg (isNothing exists) "Error: redeclaring variable"
   (Typed ev et) <- evalExp exp
-  guardWithErrorMsg (t == et) ("Error: incorrect type in declaration for " ++ name)
-  scopedSet scope (LVar name) (ev `as` et)
+  typeGuard t et ("Error: incorrect type in declaration for " ++ name)
+  scopedSet scope (LVar name) (ev `as` t)
   return Nothing
 evalStatement (Assign lval exp) scope = do
   exists <- scopedGet scope lval

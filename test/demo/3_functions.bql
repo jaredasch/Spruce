@@ -1,0 +1,13 @@
+func partialSums (n : int) -> [int] {
+    let sum : int = 0;
+    let nums : [int] = [];
+
+    for (i : int in range(n)) {
+        sum = sum + i;
+        nums = appendBack(sum, nums);
+    }
+
+    return nums;
+}
+
+return partialSums(5);
