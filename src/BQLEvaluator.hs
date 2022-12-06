@@ -115,7 +115,8 @@ getLocal :: (MonadError String m, MonadState Store m) => LValue -> m (Maybe Type
 getLocal l = do
   local <- getVar localGetStoreFunc l
   global <- getVar globalGetStoreFunc l
-  return (local <|> global)
+  func <- getFunc l
+  return (local <|> global <|> func)
 
 setLocal :: (MonadError String m, MonadState Store m) => LValue -> TypedVal -> m ()
 setLocal loc v = do
@@ -144,6 +145,15 @@ removeVar getS updateS (LVar name) = do
   store <- getS
   updateS (Map.delete name store)
 removeVar _ _ _ = error "Cannot remove arbitrary array variables"
+
+getFunc :: (MonadError String m, MonadState Store m) => LValue -> m (Maybe TypedVal)
+getFunc (LVar name) = do
+  allVars <- get
+  let funcs = fdecls allVars
+  case Map.lookup name funcs of
+    Just f -> return $ Just $ Typed (FName name) FNameT
+    Nothing -> return Nothing
+getFunc _ = undefined
 
 getVar :: (MonadError String m, MonadState Store m) => GetStoreFunc m -> LValue -> m (Maybe TypedVal)
 getVar getS (LVar name) = do
@@ -218,6 +228,7 @@ existsKV rowKey colKey = do
 typeOf :: Value -> Maybe BType
 typeOf (BoolVal _) = Just BoolT
 typeOf (IntVal _) = Just IntT
+typeOf (FName _) = Just FNameT
 typeOf (StringVal _) = Just StringT
 typeOf (ArrayVal []) = Just $ ArrayT AnyT
 typeOf (ArrayVal [h]) = typeOf h
@@ -368,12 +379,18 @@ evalExp (FCall name args) =
     Just f -> do execLibFunc f args
     Nothing -> do execUserFunc name args
 
+libFork = undefined
+
 execUserFunc :: forall m. (MonadError String m, MonadState Store m) => String -> [Exp] -> m TypedVal
 execUserFunc name args = do
   allVars <- get
+  let maybeFName = Map.lookup name (locals allVars)
+  let maybeFunc = case maybeFName of
+        Just (Typed (FName fname) FNameT) -> Map.lookup fname (fdecls allVars)
+        _ -> Map.lookup name (fdecls allVars)
   f@(FDecl name argDecls expectedRetType body) <-
     extractMaybeOrError
-      (Map.lookup name (fdecls allVars))
+      maybeFunc
       ("No function " ++ name)
   let prevLocals = locals allVars
   let newScopedStore = allVars {locals = Map.empty}
@@ -500,6 +517,7 @@ libFuncLookup "appendFront" = Just libAppendFront
 libFuncLookup "appendBack" = Just libAppendBack
 libFuncLookup "len" = Just libArrayLen
 libFuncLookup "range" = Just libRange
+libFuncLookup "fork" = Just libFork
 libFuncLookup x = Nothing
 
 guardTypes :: (MonadError String m, MonadState Store m) => [TypedVal] -> [BType] -> String -> m ()

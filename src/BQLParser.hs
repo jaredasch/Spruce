@@ -21,6 +21,7 @@ data BType
   | IntT
   | StringT
   | ArrayT BType
+  | FNameT
   | AnyT -- Only to be used internally with empty arrays, can't be used by users
   deriving (Show, Eq)
 
@@ -57,6 +58,7 @@ data Value
   | IntVal Int
   | StringVal String
   | ArrayVal [Value]
+  | FName String
   deriving (Show, Eq)
 
 data LValue
@@ -127,10 +129,13 @@ arrayValP = ArrayVal <$> P.between (P.string "[") (P.sepBy valueP (wsP $ P.strin
 
 ----- Type Parsing -----
 typeP :: Parser BType
-typeP = intTypeP <|> stringTypeP <|> boolTypeP <|> arrayTypeP <|> voidTypeP
+typeP = intTypeP <|> stringTypeP <|> boolTypeP <|> arrayTypeP <|> voidTypeP <|> funcTypeP
 
 intTypeP :: Parser BType
 intTypeP = wsP (P.string "int") $> IntT
+
+funcTypeP :: Parser BType
+funcTypeP = wsP (P.string "fname") $> FNameT
 
 stringTypeP :: Parser BType
 stringTypeP = wsP (P.string "string") $> StringT
@@ -357,8 +362,10 @@ instance PP BType where
   pp StringT = PP.text "string"
   pp (ArrayT t) = PP.brackets $ pp t
   pp AnyT = PP.text "any"
+  pp FNameT = PP.text "fname"
 
 instance PP Value where
+  pp (FName s) = PP.char '"' <> PP.text s <> PP.char '"'
   pp (IntVal i) = PP.int i
   pp (StringVal s) = PP.char '"' <> (PP.text s) <> PP.char '"'
   pp (BoolVal b) = pp b

@@ -1,4 +1,4 @@
-let sum : int = -1;
+let  sum : int = -1;
 sum = 0;
 
 for (i : int in range(11)) {

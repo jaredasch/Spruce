@@ -1,6 +1,4 @@
 resolver: lts-19.19
-allow-newer: true
+system-ghc: true
 packages:
 - .
-
-

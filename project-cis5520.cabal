@@ -22,7 +22,8 @@ common common-stanza
   ghc-options:         -Wno-type-defaults -fwarn-incomplete-patterns
   build-depends:
       base >=4.15
-    , HUnit 
+    , HUnit
+    , stm
     , QuickCheck
     , containers
     , filepath

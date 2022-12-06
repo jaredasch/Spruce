@@ -1,9 +1,10 @@
 cradle:
-  stack:
-    - path: ./test
-      component: "project-cis5520:test:project-cis5520-test"
-    - path: ./src
-      component: "project-cis5520:lib"
-    - path: ./app
+  cabal:
+    - path: "./src"
+      component: "lib:project-cis5520"
+
+    - path: "./app"
       component: "project-cis5520:exe:project-cis5520-exe"
 
+    - path: "./test"
+      component: "project-cis5520:test:project-cis5520-test"
