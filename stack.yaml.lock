@@ -3,10 +3,17 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    pantry-tree:
+      sha256: b9766739e8a87b3a8d34350673e49927fa4fcde5710b573d748b2d0cd5892cea
+      size: 219
+    hackage: monad-stm-0.1.0.2@sha256:68c509a631cbb2f49c3e8b37527d281e6fdafbedac63a4c6fa69c98f4e0b2506,1732
+  original:
+    hackage: monad-stm-0.1.0.2@sha256:68c509a631cbb2f49c3e8b37527d281e6fdafbedac63a4c6fa69c98f4e0b2506,1732
 snapshots:
 - completed:
+    sha256: a95a93bcb7132bf5f8ad3356998e223947852f57d4da63e0e145870ea90d9d18
     size: 619170
     url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/19/19.yaml
-    sha256: a95a93bcb7132bf5f8ad3356998e223947852f57d4da63e0e145870ea90d9d18
   original: lts-19.19

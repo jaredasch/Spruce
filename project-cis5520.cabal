@@ -24,6 +24,8 @@ common common-stanza
       base >=4.15
     , HUnit
     , stm
+    , monad-stm
+    , async
     , QuickCheck
     , containers
     , filepath
@@ -31,6 +33,7 @@ common common-stanza
     , network
     , directory
     , random
+    , transformers
     , mtl
   default-language:
     Haskell2010

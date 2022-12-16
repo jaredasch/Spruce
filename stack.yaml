@@ -2,3 +2,5 @@ resolver: lts-19.19
 system-ghc: true
 packages:
 - .
+extra-deps:
+- monad-stm-0.1.0.2@sha256:68c509a631cbb2f49c3e8b37527d281e6fdafbedac63a4c6fa69c98f4e0b2506,1732

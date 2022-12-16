@@ -1,0 +1,17 @@
+let shared x : int = 0;
+let shared y : int = 0;
+
+func sneakyOtherThread() -> string {
+     for (i : int in range(1000)) {
+         x = x + i;
+     }
+     y = 5;
+     return x;
+}
+
+
+let s1: string = fork(sneakyOtherThread);
+
+wait(s1);
+
+return x + y;

@@ -74,5 +74,5 @@ evalTestSuite =
       "test/demo/2_arrays.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/3_functions.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/4_badly_typed.bql" $=$ evalError "Type mismatch in array",
-      "test/demo/5_first_class.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT)
+      "test/demo/5_first_class.bql" $=$ returnVal (IntVal 10 `as` IntT)
     ]

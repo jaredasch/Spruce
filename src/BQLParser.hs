@@ -13,7 +13,9 @@ import Text.PrettyPrint (Doc, (<+>))
 import Text.PrettyPrint qualified as PP
 
 ----- Structure of BQL Query -----
-data VarDecl = VDecl BType String deriving (Show, Eq)
+
+-- VDecl <varname> <shared> <type>
+data VarDecl = VDecl String Bool BType deriving (Show, Eq)
 
 data BType
   = VoidT
@@ -41,6 +43,7 @@ data Statement
   | FCallStatement String [Exp]
   | While Exp Block
   | ForIn VarDecl Exp Block
+  | Atomic Block
   deriving (Show, Eq)
 
 data Exp
@@ -260,13 +263,16 @@ blockP :: Parser Block
 blockP = Block <$> many statementP
 
 statementP :: Parser Statement
-statementP = letP <|> assignP <|> returnP <|> ifP <|> fCallStatementP <|> whileP <|> forInP
+statementP = letP <|> assignP <|> returnP <|> ifP <|> fCallStatementP <|> whileP <|> forInP <|> atomicP
 
 varNameP :: Parser String
 varNameP = (:) <$> P.alpha <*> many (P.alpha <|> P.digit)
 
+sharedP :: Parser Bool
+sharedP = (P.string "shared " $> True) <|> (trimP (P.string "") $> False)
+
 typedVarP :: Parser VarDecl
-typedVarP = flip VDecl <$> varNameP <*> (trimP (P.string ":") *> typeP)
+typedVarP = flip VDecl <$> sharedP <*> varNameP <*> (trimP (P.string ":") *> typeP)
 
 letP :: Parser Statement
 letP = Let <$> (trimP (P.string "let ") *> typedVarP) <*> (trimP (P.string "=") *> expP) <* trimP (P.string ";")
@@ -282,6 +288,9 @@ whileP =
   While
     <$> (trimP (P.string "while") *> trimP (inParensP expP))
     <*> inBracesP blockP
+
+atomicP :: Parser Statement
+atomicP = Atomic <$> (trimP (P.string "atomic") *> trimP (inBracesP blockP))
 
 forInP :: Parser Statement
 forInP =
@@ -400,7 +409,7 @@ instance PP Exp where
       joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
 
 instance PP VarDecl where
-  pp (VDecl t n) = PP.text n <+> PP.char ':' <+> pp t
+  pp (VDecl n b t) = if b then PP.text "shared" else PP.text "" <+> PP.text n <+> PP.char ':' <+> pp t
 
 instance PP Statement where
   pp (Assign s e) = (pp s <+> PP.char '=' <+> pp e) <> PP.char ';'
@@ -424,6 +433,7 @@ instance PP Statement where
     PP.text "while " <> PP.parens (pp exp) <> PP.text " {"
       PP.$$ PP.nest 4 (pp body)
       PP.$$ PP.text "}"
+  pp (Atomic block) = PP.text "atomic" <> PP.text " {" PP.$$ PP.nest 4 (pp block) PP.$$ PP.text "}"
   pp (ForIn vdecl exp body) =
     PP.text "for " <> PP.parens (pp vdecl <> PP.text " in " <> pp exp) <> PP.text " {"
       PP.$$ PP.nest 4 (pp body)
@@ -513,7 +523,7 @@ instance Arbitrary Exp where
   shrink _ = []
 
 instance Arbitrary VarDecl where
-  arbitrary = VDecl <$> arbitrary <*> genString
+  arbitrary = VDecl <$> genString <*> QC.elements [False] <*> arbitrary
 
 instance Arbitrary LValue where
   arbitrary = LVar <$> genString
