@@ -65,14 +65,16 @@ fname $=$ expected = TestCase (assertFileResultEq fname expected)
 evalTestSuite :: Test
 evalTestSuite =
   TestList
-    -- [ "test/queries/foreach.bql" $=$ int 55,
-    --   "test/queries/global_local_naming_correct.bql" $=$ int 2,
-    --   "test/queries/badly_typed_arr.bql" $=$ evalError "Type mismatch in array",
-    --   "test/queries/global_local_naming_conflict.bql" $=$ evalError "Error: redeclaring variable"
-    -- ]
-    [ "test/demo/1_types.bql" $=$ int 55,
+    [ "test/queries/foreach.bql" $=$ int 55,
+      "test/queries/global_local_naming_correct.bql" $=$ int 2,
+      "test/queries/badly_typed_arr.bql" $=$ evalError "Type mismatch in array",
+      "test/queries/global_local_naming_conflict.bql" $=$ evalError "Error: redeclaring variable",
+      "test/queries/nested_if.bql" $=$ int (-1),
+      "test/demo/1_types.bql" $=$ int 55,
       "test/demo/2_arrays.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/3_functions.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/4_badly_typed.bql" $=$ evalError "Type mismatch in array",
-      "test/demo/5_first_class.bql" $=$ returnVal (IntVal 10 `as` IntT)
+      "test/demo/5_forkwait.bql" $=$ returnVal (IntVal 499505 `as` IntT),
+      -- "test/demo/6_race.bql" $=$ returnVal (IntVal 40000 `as` IntT),
+      "test/demo/7_atomic.bql" $=$ returnVal (IntVal 4000 `as` IntT)
     ]

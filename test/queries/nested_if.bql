@@ -1,0 +1,23 @@
+let x : int = 0;
+
+func donothing(y : int) -> void {
+    let a : int = y + 2;
+}
+
+if (x < 0) {
+    if (x < 5) {
+        donothing(2);
+        return 5;
+    } else {
+        donothing(3);
+        return 2;
+    }
+} else {
+    if (x > -2) {
+        donothing(4);
+        return -1;
+    } else {
+        donothing(5);
+        return 0;
+    }
+}

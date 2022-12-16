@@ -1,12 +1,10 @@
-set("row", "col", 11);
-
 let sum : int = 0;
 
 func add (x : int, y : int) -> int {
     return x + y;
 }
 
-for(i : int in range(get("row", "col"))) {
+for(i : int in range(11)) {
     sum = add(sum, i);
 }
 

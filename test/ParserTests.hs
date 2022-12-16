@@ -20,7 +20,7 @@ prop_roundtrip_statement s = P.parse BP.statementP (pretty s) == Right s
 
 parserQC :: IO ()
 parserQC = do
-  putStrLn "Rountrip value testing..."
+  putStrLn "\nRountrip value testing..."
   QC.quickCheck prop_roundtrip_val
   putStrLn "Rountrip expression parsing testing..."
   QC.quickCheck prop_roundtrip_exp

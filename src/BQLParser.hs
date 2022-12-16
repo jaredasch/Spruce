@@ -260,7 +260,7 @@ lvalP = process <$> first <*> rest
 
 ----- Statement/Block Parsing -----
 blockP :: Parser Block
-blockP = Block <$> many statementP
+blockP = Block <$> many (trimP statementP)
 
 statementP :: Parser Statement
 statementP = letP <|> assignP <|> returnP <|> ifP <|> fCallStatementP <|> whileP <|> forInP <|> atomicP
@@ -406,7 +406,7 @@ instance PP Exp where
   pp (ArrCons exps) = PP.brackets $ joinBy PP.comma (map pp exps)
     where
       joinBy :: Doc -> [Doc] -> Doc
-      joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
+      joinBy sep = foldr (\x acc -> if acc == PP.empty then PP.parens x else PP.parens x <> sep <> acc) PP.empty
 
 instance PP VarDecl where
   pp (VDecl n b t) = if b then PP.text "shared" else PP.text "" <+> PP.text n <+> PP.char ':' <+> pp t
@@ -425,7 +425,7 @@ instance PP Statement where
       PP.$$ PP.nest 4 (pp b2)
       PP.$$ PP.text "}"
   pp (Return e) = (PP.text "return" <+> pp e) <> PP.char ';'
-  pp (FCallStatement name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args))
+  pp (FCallStatement name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args)) <> PP.char ';'
     where
       joinBy :: Doc -> [Doc] -> Doc
       joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
@@ -528,17 +528,30 @@ instance Arbitrary VarDecl where
 instance Arbitrary LValue where
   arbitrary = LVar <$> genString
 
-genSizedStatement :: Int -> Gen Statement
-genSizedStatement 0 =
+genStatementMaxDepth :: Int -> Gen Statement
+genStatementMaxDepth 0 =
   QC.oneof
     [ Let <$> arbitrary <*> arbitrary,
-      Assign <$> arbitrary <*> arbitrary
+      Assign <$> arbitrary <*> arbitrary,
+      Return <$> arbitrary
     ]
-genSizedStatement n =
+genStatementMaxDepth n =
   QC.oneof
     [ Let <$> arbitrary <*> arbitrary,
-      Assign <$> arbitrary <*> arbitrary
+      Assign <$> arbitrary <*> arbitrary,
+      If <$> (genSizedExp 4) <*> genBlockMaxDepth (n-1) <*> genBlockMaxDepth (n-1),
+      Return <$> arbitrary,
+      FCallStatement <$> genString <*> QC.vectorOf 4 (genSizedExp 2),
+      While <$> (genSizedExp 4) <*> genBlockMaxDepth (n-1),
+      ForIn <$> arbitrary <*> genSizedExp 4 <*> genBlockMaxDepth (n-1),
+      Atomic <$> genBlockMaxDepth (n-1)
     ]
 
 instance Arbitrary Statement where
-  arbitrary = genSizedStatement 16
+  arbitrary = genStatementMaxDepth 4
+  shrink (If _ (Block b1) (Block b2)) = b1 ++ b2
+  shrink (While _ (Block b)) = b
+  shrink _ = []
+
+genBlockMaxDepth :: Int -> Gen Block
+genBlockMaxDepth n = Block <$> QC.vectorOf 5 (genStatementMaxDepth n) 
