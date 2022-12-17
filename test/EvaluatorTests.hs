@@ -26,9 +26,6 @@ returnVoid = Right Nothing
 evalError :: String -> EvalResult
 evalError = Left
 
-testFile :: String -> Either String (Maybe TypedVal) -> Test
-testFile filename expected = undefined
-
 -- Helpers to convert Haskell types to result types
 void :: EvalResult
 void = returnVoid
@@ -74,7 +71,6 @@ evalTestSuite =
       "test/demo/2_arrays.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/3_functions.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/4_badly_typed.bql" $=$ evalError "Type mismatch in array",
-      "test/demo/5_forkwait.bql" $=$ returnVal (IntVal 499505 `as` IntT),
-      -- "test/demo/6_race.bql" $=$ returnVal (IntVal 40000 `as` IntT),
-      "test/demo/7_atomic.bql" $=$ returnVal (IntVal 4000 `as` IntT)
+      "test/demo/5_forkwait.bql" $=$ returnVal (IntVal 499500 `as` IntT),
+      "test/demo/7_atomic.bql" $=$ returnVal (IntVal 6000 `as` IntT)
     ]

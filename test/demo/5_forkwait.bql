@@ -1,5 +1,5 @@
 let shared x : int = 0;
-let shared y : int = 0;
+let y : int = 0;
 
 func sneakyOtherThread() -> string {
      for (i : int in range(1000)) {

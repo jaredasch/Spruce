@@ -24,7 +24,6 @@ common common-stanza
       base >=4.15
     , HUnit
     , stm
-    , monad-stm
     , async
     , QuickCheck
     , containers
