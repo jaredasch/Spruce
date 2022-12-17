@@ -916,20 +916,6 @@ libPrint args = do
         return $ IntVal 0 `as` VoidT
     _ -> throwError "ERR: Type system internal failure"
 
------ Helper functions for testing -----
-evalStrExp :: String -> Doc
-evalStrExp s =
-  let res = doParse expP s
-   in case res of
-        Nothing -> PP.text "Parse error"
-        Just (e, r) ->
-          let value = fst $ unsafePerformIO $ runStateT (runExceptT (evalExp e)) emptyStore
-           in case value of
-                Left err -> PP.text err
-                Right val -> pp val
-
-newtype My a = My {run :: IO a} deriving (Functor, Applicative, Monad, MonadIO)
-
 evalQueryFile :: String -> IO (Either String (Maybe TypedVal))
 evalQueryFile fname = do
   parseResM <- P.parseFromFile queryP fname
