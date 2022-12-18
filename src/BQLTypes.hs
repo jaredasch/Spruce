@@ -55,7 +55,7 @@ data Value
   | StringVal String
   | ArrayVal [Value]
   | FunctionVal [VarDecl] BType Block
-  | FunctionClosure [VarDecl] BType Block ScopedStore
+  | FunctionClosure [VarDecl] BType Block ScopedStore (Maybe LValue)
   deriving (Show, Eq)
 
 data LValue

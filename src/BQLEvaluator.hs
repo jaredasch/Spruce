@@ -118,6 +118,17 @@ appendToGlobalScope global (Just local) =
     appendTail toAdd s@(ScopedS {parent = Nothing}) = s {parent = Just toAdd}
     appendTail toAdd s@(ScopedS {parent = Just p}) = s {parent = Just (appendTail toAdd p)}
 
+closureAddLVal :: TypedVal -> LValue -> TypedVal
+closureAddLVal (Typed (FunctionClosure vdecls retTy body env _) t) loc =
+  FunctionClosure vdecls retTy body env (Just loc) `as` t
+closureAddLVal (Typed (ArrayVal vals) (ArrayT t)) loc =
+  let typeAnnotatedVals = map (\x -> x `as` t) vals
+      indexAnnotatedVals = zip [0 ..] typeAnnotatedVals
+      -- error "hey"
+      closureAnnotatedVals = map (\(i, tv) -> closureAddLVal tv (LArrInd loc (Val (IntVal i)))) indexAnnotatedVals
+   in ArrayVal (map (\(Typed v t) -> v) closureAnnotatedVals) `as` (ArrayT t)
+closureAddLVal tv _ = tv
+
 -- Some abstractions that allow for code re-use between local and global variable stores
 type GetStoreFunc m = m VarStore
 
@@ -141,8 +152,8 @@ scopedGet loc = do
   scoped <- getVar loc
   return (shared <|> scoped)
 
-scopedSet :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
-scopedSet _ loc tv = do
+scopedSet :: (MonadError String m, MonadState Store m, MonadIO m) => LValue -> TypedVal -> m ()
+scopedSet loc tv = do
   shared <- getTVar sharedGetStoreFunc loc
   if Maybe.isNothing shared
     then setVar loc tv
@@ -307,7 +318,7 @@ typeOf (ArrayVal (h : t)) = do
 typeOf (FunctionVal vdecls retTy block) =
   let argTypes = map (\(VDecl name _ ty) -> ty) vdecls
    in Just $ FuncT retTy argTypes
-typeOf (FunctionClosure vdecls retTy block env) =
+typeOf (FunctionClosure vdecls retTy block env _) =
   let argTypes = map (\(VDecl name _ ty) -> ty) vdecls
    in Just $ FuncT retTy argTypes
 
@@ -462,8 +473,8 @@ evalExp :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => Exp
 evalExp (Val v@(FunctionVal vdecls retTy body)) = do
   currentLocalScope <- getNonGlobalScope
   case (currentLocalScope, typeOf v) of
-    (Nothing, Just t) -> return $ FunctionClosure vdecls retTy body (ScopedS Map.empty Nothing) `as` t
-    (Just s, Just t) -> return $ FunctionClosure vdecls retTy body s `as` t
+    (Nothing, Just t) -> return $ FunctionClosure vdecls retTy body (ScopedS Map.empty Nothing) Nothing `as` t
+    (Just s, Just t) -> return $ FunctionClosure vdecls retTy body s Nothing `as` t
     _ -> error "Internal error"
 evalExp (Val v) = do
   case typeOf v of
@@ -537,10 +548,10 @@ execNamedUserFunc name args = do
   store <- get
   maybeFExp <- getVar (LVar name)
   fval <- extractMaybeOrError maybeFExp ("No function" ++ name)
-  execUserFunc (LVar name) fval args
+  execUserFunc fval args
 
-execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => LValue -> TypedVal -> [Exp] -> m TypedVal
-execUserFunc loc (Typed (FunctionClosure argDecls expectedRetType body env) t) args = do
+execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> [Exp] -> m TypedVal
+execUserFunc (Typed (FunctionClosure argDecls expectedRetType body env locM) t) args = do
   store <- get
   localScopes <- getNonGlobalScope
   globalScope <- getGlobalScope
@@ -551,8 +562,10 @@ execUserFunc loc (Typed (FunctionClosure argDecls expectedRetType body env) t) a
   ret <- evalBlock body
   updatedClosureEnvStoreM <- getNonGlobalScope
   let newEnv = newClosureEnv updatedClosureEnvStoreM
-  let updatedClosure = FunctionClosure argDecls expectedRetType body newEnv
-  setVar loc (updatedClosure `as` t)
+  let updatedClosure = FunctionClosure argDecls expectedRetType body newEnv locM
+  case locM of
+    Nothing -> return ()
+    Just loc -> setVar loc (updatedClosure `as` t)
   newGlobalScope <- getGlobalScope
   let restoredVars = appendToGlobalScope newGlobalScope localScopes
   put store {vars = restoredVars}
@@ -579,7 +592,7 @@ execUserFunc loc (Typed (FunctionClosure argDecls expectedRetType body env) t) a
       setVar (LVar vname) tv
       setLocalArgBindings declT tvT
     setLocalArgBindings _ _ = do throwError "Argument mismatch in function call"
-execUserFunc loc v _ = throwError $ "ERR: Attemtping to call non-callable object" <> (show v)
+execUserFunc v _ = throwError $ "ERR: Attemtping to call non-callable object" <> (show v)
 
 execLibFunc :: (MonadError String m, MonadState Store m, MonadIO m) => ([TypedVal] -> m TypedVal) -> [Exp] -> m TypedVal
 execLibFunc f args = do
@@ -599,14 +612,14 @@ evalStatement (Let v@(VDecl name shared t) exp) = do
   guardWithErrorMsg (isNothing exists) "Error: redeclaring variable"
   (Typed ev et) <- evalExp exp
   typeGuard t et ("Error: incorrect type in declaration for " ++ name)
-  scopedCreateVar shared (LVar name) (ev `as` t)
+  scopedCreateVar shared (LVar name) (closureAddLVal (ev `as` t) (LVar name))
   return Nothing
 evalStatement (Assign lval exp) = do
   exists <- scopedGet lval
   (Typed currentV expectedT) <- extractMaybeOrError exists ("Error: assignment to undeclared variable" ++ show lval)
   e <- evalExp exp
   typeGuard (typeof e) expectedT "Error: Assignment must respect the use the same type"
-  scopedSet False lval e
+  scopedSet lval (closureAddLVal e lval)
   return Nothing
 evalStatement (Return exp) = do
   tv <- evalExp exp
@@ -757,7 +770,7 @@ evalQuery (Query fdecls main) = do
     aux (FDecl name vdecls retTy block) =
       let argTypes = map (\(VDecl _ _ argTy) -> argTy) vdecls
           fType = FuncT retTy argTypes
-          fValue = FunctionClosure vdecls retTy block (ScopedS Map.empty Nothing)
+          fValue = FunctionClosure vdecls retTy block (ScopedS Map.empty Nothing) Nothing
        in (name, fValue `as` fType)
 
 -- Library Functions
@@ -819,7 +832,7 @@ libRange args = do
 execIO :: (MonadIO m) => TypedVal -> Store -> m ()
 execIO fval store =
   do
-    (evalRes, finalStore) <- runStateT (runExceptT (execUserFunc (LVar "fork") fval [])) store
+    (evalRes, finalStore) <- runStateT (runExceptT (execUserFunc fval [])) store
     case evalRes of
       Left evalErr -> error ("Forked function failed: " <> evalErr)
       Right res -> return ()
@@ -829,7 +842,7 @@ libFork args = do
   -- TODO : Type guards
   let typedFVal@(Typed v1 t1) = args !! 0
   case (t1, v1) of
-    (FuncT _ _, FunctionClosure vdecls retTy block _) -> do
+    (FuncT _ _, FunctionClosure vdecls retTy block _ _) -> do
       allVars <- get
       async <- liftIO $ async (execIO typedFVal allVars)
       let threads' = async : threads allVars
