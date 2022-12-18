@@ -161,13 +161,18 @@ scopedSetSTM = setTVarSTM sharedGetStoreFunc
 scopedRemoveSTM :: (MonadState Store m, MonadSTM m, MonadIO m) => LValue -> m ()
 scopedRemoveSTM = removeVarSTM
 
-scopedGet :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> m (Maybe TypedVal)
-scopedGet True = getTVar sharedGetStoreFunc
-scopedGet False = getVar
+scopedGet :: (MonadError String m, MonadState Store m, MonadIO m) => LValue -> m (Maybe TypedVal)
+scopedGet loc = do
+  shared <- getTVar sharedGetStoreFunc loc
+  scoped <- getVar loc
+  return (shared <|> scoped)
 
 scopedSet :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
-scopedSet True = setTVar sharedGetStoreFunc
-scopedSet False = setVar
+scopedSet _ loc tv = do
+  shared <- getTVar sharedGetStoreFunc loc
+  if Maybe.isNothing shared
+    then setVar loc tv
+    else setTVar sharedGetStoreFunc loc tv
 
 scopedCreateVar :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
 scopedCreateVar True = setTVar sharedGetStoreFunc
@@ -488,7 +493,7 @@ evalExp (Val v) = do
     Just t -> return $ v `as` t
     _ -> throwError $ "Type error" ++ show v
 evalExp (Var s) = do
-  var <- scopedGet False (LVar s)
+  var <- scopedGet (LVar s)
   case var of
     Just v -> return v
     Nothing -> throwError $ "Use of undeclared variable " ++ s
@@ -592,14 +597,14 @@ execLibFunc f args = do
 -- Statement evaluation
 evalStatement :: (MonadError String m, MonadState Store m, MonadIO m) => Statement -> m (Maybe TypedVal)
 evalStatement (Let v@(VDecl name shared t) exp) = do
-  exists <- scopedGet shared (LVar name)
+  exists <- scopedGet (LVar name)
   guardWithErrorMsg (isNothing exists) "Error: redeclaring variable"
   (Typed ev et) <- evalExp exp
   typeGuard t et ("Error: incorrect type in declaration for " ++ name)
   scopedCreateVar shared (LVar name) (ev `as` t)
   return Nothing
 evalStatement (Assign lval exp) = do
-  exists <- scopedGet False lval
+  exists <- scopedGet lval
   (Typed currentV expectedT) <- extractMaybeOrError exists ("Error: assignment to undeclared variable" ++ show lval)
   e <- evalExp exp
   typeGuard (typeof e) expectedT "Error: Assignment must respect the use the same type"
@@ -640,7 +645,7 @@ evalStatement (Atomic block) = do
   return value
 evalStatement (ForIn vdecl@(VDecl n b t) exp body) = do
   v@(Typed expV expT) <- evalExp exp
-  currentIterBind <- scopedGet b (LVar n)
+  currentIterBind <- scopedGet (LVar n)
   case (expT, expV) of
     (ArrayT innerT, ArrayVal vals) ->
       if t /= innerT
@@ -817,7 +822,7 @@ execIO fval store =
   do
     (evalRes, finalStore) <- runStateT (runExceptT (execUserFunc fval [])) store
     case evalRes of
-      Left evalErr -> error "Forked function failed"
+      Left evalErr -> error ("Forked function failed: " <> evalErr)
       Right res -> return ()
 
 libFork :: (MonadError String m, MonadState Store m, MonadIO m) => [TypedVal] -> m TypedVal
