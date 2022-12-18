@@ -13,4 +13,5 @@ let x1 : function = x[1];
 x0();
 x1();
 x0();
+x0();
 return x1();
