@@ -1,0 +1,13 @@
+func makeCounter () -> function {
+    let i : int = 0;
+    let count : function = func () -> int {
+        i = i + 1;
+        return i;
+    };
+    return count;
+}
+
+let counter : function = makeCounter();
+counter();
+counter();
+return counter();

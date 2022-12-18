@@ -1,0 +1,10 @@
+func a () -> int {
+    let i : int = 0;
+    return b();
+}
+
+func b () -> int {
+    return i + 1;
+}
+
+return a();

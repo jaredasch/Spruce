@@ -122,6 +122,7 @@ data ScopedStore = ScopedS
   { bindings :: VarStore,
     parent :: Maybe ScopedStore
   }
+  deriving (Show)
 
 initScope :: ScopedStore
 initScope = ScopedS {bindings = Map.empty, parent = Nothing}
@@ -143,6 +144,30 @@ pushNewScope = do
   let scopedVars = vars store
   let newScopedStore = ScopedS {parent = Just scopedVars, bindings = Map.empty}
   put store {vars = newScopedStore}
+
+getGlobalScope :: (MonadState Store m, MonadIO m) => m ScopedStore
+getGlobalScope = do gets (getListTail . vars)
+  where
+    getListTail :: ScopedStore -> ScopedStore
+    getListTail s@(ScopedS {parent = Nothing}) = s
+    getListTail (ScopedS {parent = Just s}) = getListTail s
+
+getNonGlobalScope :: (MonadState Store m, MonadIO m) => m (Maybe ScopedStore)
+getNonGlobalScope = do
+  gets (aux . vars)
+  where
+    aux :: ScopedStore -> Maybe ScopedStore
+    aux s@(ScopedS {parent = Nothing}) = Nothing
+    aux s@(ScopedS {parent = Just p}) = Just $ s {parent = (aux p)}
+
+appendToGlobalScope :: ScopedStore -> Maybe ScopedStore -> ScopedStore
+appendToGlobalScope global Nothing = global
+appendToGlobalScope global (Just local) =
+  appendTail global local
+  where
+    appendTail :: ScopedStore -> ScopedStore -> ScopedStore
+    appendTail toAdd s@(ScopedS {parent = Nothing}) = s {parent = Just toAdd}
+    appendTail toAdd s@(ScopedS {parent = Just p}) = s {parent = Just (appendTail toAdd p)}
 
 -- Some abstractions that allow for code re-use between local and global variable stores
 type GetStoreFunc m = m VarStore
@@ -558,22 +583,35 @@ execNamedUserFunc name args = do
 
 execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> [Exp] -> m TypedVal
 execUserFunc (Typed (FunctionVal argDecls expectedRetType body) _) args = do
+  store <- get
+  localScopes <- getNonGlobalScope
+  globalScope <- getGlobalScope
+  argVals <- evalArgs args
+  put store {vars = globalScope}
   pushNewScope
-  setLocalArgBindings argDecls args
+  setLocalArgBindings argDecls argVals
   ret <- evalBlock body
-  popLocalScope
+  newGlobalScope <- getGlobalScope
+  let restoredVars = appendToGlobalScope newGlobalScope localScopes
+  put store {vars = restoredVars}
   case (ret, expectedRetType) of
     (Just x@(Typed retVal retTy), _) -> return x
     (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
     (_, _) -> throwError "Return type for function doesn't match return value"
   where
-    setLocalArgBindings :: [VarDecl] -> [Exp] -> m ()
+    evalArgs :: [Exp] -> m [TypedVal]
+    evalArgs [] = do return []
+    evalArgs (h : t) = do
+      tv <- evalExp h
+      tail <- evalArgs t
+      return $ tv : tail
+
+    setLocalArgBindings :: [VarDecl] -> [TypedVal] -> m ()
     setLocalArgBindings [] [] = do return ()
-    setLocalArgBindings ((VDecl vname vshared vty) : declT) (exp : expT) = do
-      e@(Typed eVal eTy) <- evalExp exp
+    setLocalArgBindings ((VDecl vname vshared vty) : declT) (tv@(Typed eVal eTy) : tvT) = do
       typeGuard eTy vty "Argument type doesn't match function declaration"
-      setVar (LVar vname) e
-      setLocalArgBindings declT expT
+      setVar (LVar vname) tv
+      setLocalArgBindings declT tvT
     setLocalArgBindings _ _ = do throwError "Argument mismatch in function call"
 execUserFunc v _ = throwError $ "ERR: Attemtping to call non-callable object" <> (show v)
 
@@ -644,7 +682,6 @@ evalStatement (Atomic block) = do
   return value
 evalStatement (ForIn vdecl@(VDecl n b t) exp body) = do
   v@(Typed expV expT) <- evalExp exp
-  currentIterBind <- scopedGet (LVar n)
   case (expT, expV) of
     (ArrayT innerT, ArrayVal vals) ->
       if t /= innerT

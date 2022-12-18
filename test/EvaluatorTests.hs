@@ -67,6 +67,7 @@ evalTestSuite =
       "test/queries/badly_typed_arr.bql" $=$ evalError "Type mismatch in array",
       "test/queries/global_local_naming_conflict.bql" $=$ evalError "Error: redeclaring variable",
       "test/queries/nested_if.bql" $=$ int (-1),
+      "test/queries/bad_scoping.bql" $=$ evalError "Use of undeclared variable i",
       "test/demo/01_types.bql" $=$ int 55,
       "test/demo/02_arrays.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/03_functions.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
