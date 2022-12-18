@@ -1,9 +1,9 @@
 module EvaluatorTests where
 
-import BQLEvaluator (TypedVal, as)
+import BQLEvaluator (as)
 import BQLEvaluator qualified as BE
-import BQLParser (BType (..), Value (..))
 import BQLParser qualified as BP
+import BQLTypes (BType (..), TypedVal, Value (..))
 import Test.HUnit (Assertion, Test (TestCase, TestList), assertFailure, runTestTT, (~:), (~?=))
 import Text.PrettyPrint (render, text)
 
@@ -75,5 +75,6 @@ evalTestSuite =
       "test/demo/05_forkwait.bql" $=$ int 499500,
       "test/demo/07_atomic.bql" $=$ int 6000,
       "test/demo/09_firstclassfuncs.bql" $=$ int 2,
-      "test/demo/10_scoping_complex.bql" $=$ int 165
+      "test/demo/10_scoping_complex.bql" $=$ int 165,
+      "test/demo/11_closures.bql" $=$ int 3
     ]

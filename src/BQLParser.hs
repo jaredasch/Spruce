@@ -1,5 +1,6 @@
 module BQLParser where
 
+import BQLTypes
 import Control.Applicative
 import Control.Monad (void)
 import Data.Functor (($>))
@@ -11,87 +12,6 @@ import Test.QuickCheck (Arbitrary (..), Gen)
 import Test.QuickCheck qualified as QC
 import Text.PrettyPrint (Doc, (<+>))
 import Text.PrettyPrint qualified as PP
-
------ Structure of BQL Query -----
-
--- VDecl <varname> <shared> <type>
-data VarDecl = VDecl String Bool BType deriving (Show, Eq)
-
-data BType
-  = VoidT
-  | BoolT
-  | IntT
-  | StringT
-  | ArrayT BType
-  | FuncAny -- Used for parsing
-  | FuncT BType [BType] -- Used for internal type checking
-  | AnyT -- Only to be used internally with empty arrays, can't be used by users
-  deriving (Show, Eq)
-
--- | The first argument contains all function declarations, the second is the main
--- code to be executed
-data Query = Query [FDecl] Block deriving (Show, Eq)
-
-data FDecl = FDecl String [VarDecl] BType Block deriving (Show, Eq)
-
-newtype Block = Block [Statement] deriving (Show, Eq)
-
-data Statement
-  = Assign LValue Exp
-  | Let VarDecl Exp
-  | If Exp Block Block
-  | Return Exp
-  | FCallStatement String [Exp]
-  | While Exp Block
-  | ForIn VarDecl Exp Block
-  | Atomic Block
-  deriving (Show, Eq)
-
-data Exp
-  = Val Value
-  | Var String
-  | ArrInd Exp Exp
-  | ArrCons [Exp]
-  | BOp Bop Exp Exp
-  | UOp Uop Exp
-  | FCall String [Exp]
-  deriving (Show, Eq)
-
-data Value
-  = BoolVal Bool
-  | IntVal Int
-  | StringVal String
-  | ArrayVal [Value]
-  | FunctionVal [VarDecl] BType Block
-  deriving (Show, Eq)
-
-data LValue
-  = LVar String
-  | LArrInd LValue Exp
-  deriving (Show, Eq)
-
-data Bop
-  = Add
-  | Sub
-  | Mult
-  | Div
-  | Mod
-  | And
-  | Or
-  | Gt
-  | Ge
-  | Eq
-  | NEq
-  | Lt
-  | Le
-  deriving (Show, Eq)
-
-data Uop
-  = Neg
-  | Not
-  deriving (Show, Eq)
-
------ Auxiliary Parsing Types -----
 
 ----- Parsing Helpers -----
 constP :: String -> a -> Parser a

@@ -1,23 +1,13 @@
 module BQLEvaluator where
 
 import BQLParser
-  ( BType (..),
-    Block (..),
-    Bop (..),
-    Exp (..),
-    FDecl (..),
-    LValue (..),
-    PP (..),
-    Query (..),
-    Statement (..),
-    Uop (..),
-    Value (..),
-    VarDecl (..),
+  ( PP (..),
     blockP,
     expP,
     queryP,
     statementP,
   )
+import BQLTypes
 import Control.Applicative
 import Control.Concurrent (ThreadId, forkIO, threadDelay)
 import Control.Concurrent.Async (Async (..), async, wait)
@@ -73,32 +63,6 @@ import System.IO.Unsafe (unsafePerformIO)
 import Text.PrettyPrint (Doc, (<+>))
 import Text.PrettyPrint qualified as PP
 
-class MonadSTM m where liftSTM :: STM a -> m a
-
-instance MonadIO STM where liftIO = undefined
-
-instance MonadSTM STM where liftSTM = id
-
-instance (Monad m, MonadSTM m, MonadTrans t) => MonadSTM (t m) where
-  liftSTM = lift . liftSTM
-
--- Map type for row-column-based key-value store
-type KVStore = Map String (Map String TypedVal)
-
--- Map type for local/global variables
-type VarStore = Map String TypedVal
-
--- Map type for transactional variables
-type TVarStore = Map String (TVar TypedVal)
-
--- Function table to store user-defined functions
-type FunctionTable = Map String FDecl
-
-data Scope = Global | Local deriving (Show)
-
--- Data type for storing typed values
-data TypedVal = Typed Value BType deriving (Show, Eq)
-
 as :: Value -> BType -> TypedVal
 v `as` t = Typed v t
 
@@ -108,22 +72,7 @@ typeof (Typed v t) = t
 instance PP TypedVal where
   pp (Typed v t) = pp v <> PP.text " : " <> pp t
 
--- Code executes against a function-local scope, global scope, and persistent
--- KV-store, and must also track user function definitions
-data Store = St
-  { vars :: ScopedStore,
-    shared :: TVarStore,
-    fdecls :: FunctionTable,
-    threads :: [Async ()]
-  }
-
--- Types for scope
-data ScopedStore = ScopedS
-  { bindings :: VarStore,
-    parent :: Maybe ScopedStore
-  }
-  deriving (Show)
-
+-- Helper functions for dealing with scope
 initScope :: ScopedStore
 initScope = ScopedS {bindings = Map.empty, parent = Nothing}
 
@@ -358,6 +307,9 @@ typeOf (ArrayVal (h : t)) = do
 typeOf (FunctionVal vdecls retTy block) =
   let argTypes = map (\(VDecl name _ ty) -> ty) vdecls
    in Just $ FuncT retTy argTypes
+typeOf (FunctionClosure vdecls retTy block env) =
+  let argTypes = map (\(VDecl name _ ty) -> ty) vdecls
+   in Just $ FuncT retTy argTypes
 
 guardWithErrorMsg :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> String -> m ()
 guardWithErrorMsg b m = do if b then return () else throwError m
@@ -507,6 +459,12 @@ evalExpSTM (FCall name args) = error "You cannot call functions in shared memory
 
 -- Main logic for expression evaluation
 evalExp :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => Exp -> m TypedVal
+evalExp (Val v@(FunctionVal vdecls retTy body)) = do
+  currentLocalScope <- getNonGlobalScope
+  case (currentLocalScope, typeOf v) of
+    (Nothing, Just t) -> return $ FunctionClosure vdecls retTy body (ScopedS Map.empty Nothing) `as` t
+    (Just s, Just t) -> return $ FunctionClosure vdecls retTy body s `as` t
+    _ -> error "Internal error"
 evalExp (Val v) = do
   case typeOf v of
     Just t -> return $ v `as` t
@@ -579,18 +537,22 @@ execNamedUserFunc name args = do
   store <- get
   maybeFExp <- getVar (LVar name)
   fval <- extractMaybeOrError maybeFExp ("No function" ++ name)
-  execUserFunc fval args
+  execUserFunc (LVar name) fval args
 
-execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> [Exp] -> m TypedVal
-execUserFunc (Typed (FunctionVal argDecls expectedRetType body) _) args = do
+execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => LValue -> TypedVal -> [Exp] -> m TypedVal
+execUserFunc loc (Typed (FunctionClosure argDecls expectedRetType body env) t) args = do
   store <- get
   localScopes <- getNonGlobalScope
   globalScope <- getGlobalScope
   argVals <- evalArgs args
-  put store {vars = globalScope}
+  put store {vars = appendToGlobalScope globalScope (Just env)}
   pushNewScope
   setLocalArgBindings argDecls argVals
   ret <- evalBlock body
+  updatedClosureEnvStoreM <- getNonGlobalScope
+  let newEnv = newClosureEnv updatedClosureEnvStoreM
+  let updatedClosure = FunctionClosure argDecls expectedRetType body newEnv
+  setVar loc (updatedClosure `as` t)
   newGlobalScope <- getGlobalScope
   let restoredVars = appendToGlobalScope newGlobalScope localScopes
   put store {vars = restoredVars}
@@ -599,6 +561,10 @@ execUserFunc (Typed (FunctionVal argDecls expectedRetType body) _) args = do
     (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
     (_, _) -> throwError "Return type for function doesn't match return value"
   where
+    newClosureEnv :: Maybe ScopedStore -> ScopedStore
+    newClosureEnv Nothing = ScopedS Map.empty Nothing
+    newClosureEnv (Just s) = s
+
     evalArgs :: [Exp] -> m [TypedVal]
     evalArgs [] = do return []
     evalArgs (h : t) = do
@@ -613,7 +579,7 @@ execUserFunc (Typed (FunctionVal argDecls expectedRetType body) _) args = do
       setVar (LVar vname) tv
       setLocalArgBindings declT tvT
     setLocalArgBindings _ _ = do throwError "Argument mismatch in function call"
-execUserFunc v _ = throwError $ "ERR: Attemtping to call non-callable object" <> (show v)
+execUserFunc loc v _ = throwError $ "ERR: Attemtping to call non-callable object" <> (show v)
 
 execLibFunc :: (MonadError String m, MonadState Store m, MonadIO m) => ([TypedVal] -> m TypedVal) -> [Exp] -> m TypedVal
 execLibFunc f args = do
@@ -647,7 +613,6 @@ evalStatement (Return exp) = do
   return $ Just tv
 evalStatement (FCallStatement name args) = do
   e <- evalExp (FCall name args)
-  typeGuard (typeof e) VoidT "Calling function as statement with non-void return type"
   return Nothing
 evalStatement (If exp b1 b2) = do
   e <- evalExp exp
@@ -792,7 +757,7 @@ evalQuery (Query fdecls main) = do
     aux (FDecl name vdecls retTy block) =
       let argTypes = map (\(VDecl _ _ argTy) -> argTy) vdecls
           fType = FuncT retTy argTypes
-          fValue = FunctionVal vdecls retTy block
+          fValue = FunctionClosure vdecls retTy block (ScopedS Map.empty Nothing)
        in (name, fValue `as` fType)
 
 -- Library Functions
@@ -854,7 +819,7 @@ libRange args = do
 execIO :: (MonadIO m) => TypedVal -> Store -> m ()
 execIO fval store =
   do
-    (evalRes, finalStore) <- runStateT (runExceptT (execUserFunc fval [])) store
+    (evalRes, finalStore) <- runStateT (runExceptT (execUserFunc (LVar "fork") fval [])) store
     case evalRes of
       Left evalErr -> error ("Forked function failed: " <> evalErr)
       Right res -> return ()
@@ -864,7 +829,7 @@ libFork args = do
   -- TODO : Type guards
   let typedFVal@(Typed v1 t1) = args !! 0
   case (t1, v1) of
-    (FuncT _ _, FunctionVal vdecls retTy block) -> do
+    (FuncT _ _, FunctionClosure vdecls retTy block _) -> do
       allVars <- get
       async <- liftIO $ async (execIO typedFVal allVars)
       let threads' = async : threads allVars

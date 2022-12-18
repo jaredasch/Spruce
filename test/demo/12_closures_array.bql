@@ -7,7 +7,4 @@ func makeCounter () -> function {
     return count;
 }
 
-let counter : function = makeCounter();
-let x1 : int = counter();
-let x2 : int = counter();
-return counter();
+let x : [function] = [makeCounter(), makeCounter()];
