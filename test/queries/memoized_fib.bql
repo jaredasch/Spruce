@@ -15,4 +15,4 @@ let makeFib : function = func () -> int {
 };
 
 let fib : function = makeFib();
-return [fib(10), fib(11), fib(12)];
+return [fib(20), fib(21), fib(22)];
