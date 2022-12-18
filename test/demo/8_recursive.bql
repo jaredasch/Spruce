@@ -1,0 +1,9 @@
+func prod (n : int) -> int {
+    if (n == 1) {
+        return 1;
+    } else {
+        return n*prod(n-1) * n; 
+    }
+}
+
+return prod(3);

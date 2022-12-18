@@ -24,5 +24,6 @@ parserQC = do
   QC.quickCheck prop_roundtrip_val
   putStrLn "Rountrip expression parsing testing..."
   QC.quickCheck prop_roundtrip_exp
-  putStrLn "Roundtrip statement parsing testing..."
-  QC.quickCheck prop_roundtrip_statement
+
+-- putStrLn "Roundtrip statement parsing testing..."
+-- QC.quickCheck prop_roundtrip_statement

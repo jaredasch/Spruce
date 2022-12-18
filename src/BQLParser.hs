@@ -24,6 +24,7 @@ data BType
   | StringT
   | ArrayT BType
   | FNameT
+  | FuncT BType [BType]
   | AnyT -- Only to be used internally with empty arrays, can't be used by users
   deriving (Show, Eq)
 
@@ -62,6 +63,7 @@ data Value
   | StringVal String
   | ArrayVal [Value]
   | FName String
+  | FunctionVal [VarDecl] BType Block
   deriving (Show, Eq)
 
 data LValue
@@ -539,12 +541,12 @@ genStatementMaxDepth n =
   QC.oneof
     [ Let <$> arbitrary <*> arbitrary,
       Assign <$> arbitrary <*> arbitrary,
-      If <$> (genSizedExp 4) <*> genBlockMaxDepth (n-1) <*> genBlockMaxDepth (n-1),
+      If <$> (genSizedExp 4) <*> genBlockMaxDepth (n - 1) <*> genBlockMaxDepth (n - 1),
       Return <$> arbitrary,
       FCallStatement <$> genString <*> QC.vectorOf 4 (genSizedExp 2),
-      While <$> (genSizedExp 4) <*> genBlockMaxDepth (n-1),
-      ForIn <$> arbitrary <*> genSizedExp 4 <*> genBlockMaxDepth (n-1),
-      Atomic <$> genBlockMaxDepth (n-1)
+      While <$> (genSizedExp 4) <*> genBlockMaxDepth (n - 1),
+      ForIn <$> arbitrary <*> genSizedExp 4 <*> genBlockMaxDepth (n - 1),
+      Atomic <$> genBlockMaxDepth (n - 1)
     ]
 
 instance Arbitrary Statement where
@@ -554,4 +556,4 @@ instance Arbitrary Statement where
   shrink _ = []
 
 genBlockMaxDepth :: Int -> Gen Block
-genBlockMaxDepth n = Block <$> QC.vectorOf 5 (genStatementMaxDepth n) 
+genBlockMaxDepth n = Block <$> QC.vectorOf 5 (genStatementMaxDepth n)

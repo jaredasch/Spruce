@@ -34,9 +34,9 @@ import Control.Concurrent.STM
 import Control.Monad (liftM)
 import Control.Monad.Except
   ( ExceptT,
-    liftEither,
     MonadError (throwError),
     guard,
+    liftEither,
     mapExceptT,
     runExceptT,
   )
@@ -111,129 +111,67 @@ instance PP TypedVal where
 -- Code executes against a function-local scope, global scope, and persistent
 -- KV-store, and must also track user function definitions
 data Store = St
-  { locals :: VarStore,
-    globals :: VarStore,
-    persist :: KVStore,
+  { vars :: ScopedStore,
     shared :: TVarStore,
     fdecls :: FunctionTable,
     threads :: [Async ()]
   }
 
+-- Types for scope
+data ScopedStore = ScopedS
+  { bindings :: VarStore,
+    parent :: Maybe ScopedStore
+  }
+
+initScope :: ScopedStore
+initScope = ScopedS {bindings = Map.empty, parent = Nothing}
+
 emptyStore :: Store
-emptyStore = St {locals = Map.empty, globals = Map.empty, persist = Map.empty, fdecls = Map.empty, shared = Map.empty, threads = []}
+emptyStore = St {vars = initScope, fdecls = Map.empty, shared = Map.empty, threads = []}
+
+popLocalScope :: (MonadError String m, MonadState Store m, MonadIO m) => m ()
+popLocalScope = do
+  store <- get
+  let scoped = vars store
+  case parent scoped of
+    Just p -> put store {vars = p}
+    Nothing -> error "Trying to unwind empty scope stack"
+
+pushNewScope :: (MonadError String m, MonadState Store m, MonadIO m) => m ()
+pushNewScope = do
+  store <- get
+  let scopedVars = vars store
+  let newScopedStore = ScopedS {parent = Just scopedVars, bindings = Map.empty}
+  put store {vars = newScopedStore}
 
 -- Some abstractions that allow for code re-use between local and global variable stores
 type GetStoreFunc m = m VarStore
 
 type UpdateStoreFunc m = VarStore -> m ()
 
-localGetStoreFunc :: (MonadError String m, MonadState Store m, MonadIO m) => m VarStore
-localGetStoreFunc = gets locals
-
 sharedGetStoreFunc :: (MonadState Store m, MonadIO m) => m TVarStore
 sharedGetStoreFunc = gets shared
 
-localUpdateStoreFunc :: (MonadError String m, MonadState Store m, MonadIO m) => VarStore -> m ()
-localUpdateStoreFunc v = do
-  allVars <- get
-  put allVars {locals = v}
+scopedGetSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => LValue -> m (Maybe TypedVal)
+scopedGetSTM = getTVarSTM sharedGetStoreFunc
 
-scopedGetSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Scope -> Bool -> LValue -> m (Maybe TypedVal)
-scopedGetSTM Global shared = getGlobalSTM shared
-scopedGetSTM Local shared = getLocalSTM shared
+scopedSetSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => LValue -> TypedVal -> m ()
+scopedSetSTM = setTVarSTM sharedGetStoreFunc
 
-scopedSetSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Scope -> Bool -> LValue -> TypedVal -> m ()
-scopedSetSTM Global shared = setGlobalSTM shared
-scopedSetSTM Local shared = setLocalSTM shared
+scopedRemoveSTM :: (MonadState Store m, MonadSTM m, MonadIO m) => LValue -> m ()
+scopedRemoveSTM = removeVarSTM
 
-scopedRemoveSTM :: (MonadState Store m, MonadSTM m, MonadIO m) => Scope -> LValue -> m ()
-scopedRemoveSTM Global = removeVarSTM
-scopedRemoveSTM Local = removeVarSTM
+scopedGet :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> m (Maybe TypedVal)
+scopedGet True = getTVar sharedGetStoreFunc
+scopedGet False = getVar
 
-scopedGet :: (MonadError String m, MonadState Store m, MonadIO m) => Scope -> Bool -> LValue -> m (Maybe TypedVal)
-scopedGet Global shared = getGlobal shared
-scopedGet Local shared = getLocal shared
+scopedSet :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
+scopedSet True = setTVar sharedGetStoreFunc
+scopedSet False = setVar
 
-scopedSet :: (MonadError String m, MonadState Store m, MonadIO m) => Scope -> Bool -> LValue -> TypedVal -> m ()
-scopedSet Global shared = setGlobal shared
-scopedSet Local shared = setLocal shared
-
-scopedRemove :: (MonadError String m, MonadState Store m, MonadIO m) => Scope -> LValue -> m ()
-scopedRemove Global = removeVar globalGetStoreFunc globalUpdateStoreFunc
-scopedRemove Local = removeVar localGetStoreFunc localUpdateStoreFunc
-
-getGlobalSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Bool -> LValue -> m (Maybe TypedVal)
-getGlobalSTM shrd loc = getTVarSTM sharedGetStoreFunc loc
-
-getLocalSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Bool -> LValue -> m (Maybe TypedVal)
-getLocalSTM shrd loc = getTVarSTM sharedGetStoreFunc loc
-
-setLocalSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
-setLocalSTM shrd loc v = setTVarSTM sharedGetStoreFunc loc v
-
-setGlobalSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
-setGlobalSTM shrd loc v = setTVarSTM sharedGetStoreFunc loc v
-
-getLocal :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> m (Maybe TypedVal)
-getLocal shrd l = do
-  shared <- getTVar sharedGetStoreFunc l
-  if shrd
-    then return shared
-    else
-      ( do
-          local <- getVar localGetStoreFunc l
-          global <- getVar globalGetStoreFunc l
-          func <- getFunc l
-          return (shared <|> local <|> global <|> func)
-      )
-
-setLocal :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
-setLocal shrd loc v = do
-  existsShared <- getTVar sharedGetStoreFunc loc
-  if shrd
-    then setTVar sharedGetStoreFunc loc v
-    else
-      ( do
-          existsGlobal <- getVar globalGetStoreFunc loc
-          -- set global, then shared, then local
-          case existsGlobal of
-            Just _ -> setVar globalGetStoreFunc globalUpdateStoreFunc loc v
-            Nothing -> case existsShared of
-              Just _ -> setTVar sharedGetStoreFunc loc v
-              Nothing -> setVar localGetStoreFunc localUpdateStoreFunc loc v
-      )
-
-globalGetStoreFunc :: (MonadError String m, MonadState Store m, MonadIO m) => m VarStore
-globalGetStoreFunc = gets globals
-
-globalUpdateStoreFunc :: (MonadError String m, MonadState Store m, MonadIO m) => VarStore -> m ()
-globalUpdateStoreFunc v = do
-  allVars <- get
-  put allVars {globals = v}
-
-getGlobal :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> m (Maybe TypedVal)
-getGlobal shrd loc = do
-  existsShared <- getTVar sharedGetStoreFunc loc
-  if shrd
-    then return existsShared
-    else
-      ( do
-          existsGlobal <- getVar globalGetStoreFunc loc
-          return (existsShared <|> existsGlobal)
-      )
-
-setGlobal :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
-setGlobal shrd loc v = do
-  existsShared <- getTVar sharedGetStoreFunc loc
-  if shrd
-    then setTVar sharedGetStoreFunc loc v
-    else
-      ( do
-          existsGlobal <- getVar globalGetStoreFunc loc
-          case existsShared of
-            Nothing -> setVar globalGetStoreFunc globalUpdateStoreFunc loc v
-            Just tv -> setTVar sharedGetStoreFunc loc v
-      )
+scopedCreateVar :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> LValue -> TypedVal -> m ()
+scopedCreateVar True = setTVar sharedGetStoreFunc
+scopedCreateVar False = createVar
 
 -- Internal functions for setting/getting over an arbitrary VarStore
 removeVar :: (MonadError String m, MonadState Store m, MonadIO m) => GetStoreFunc m -> UpdateStoreFunc m -> LValue -> m ()
@@ -259,13 +197,12 @@ getTVar getS (LVar name) = do
     Just tv -> liftIO $ Just <$> readTVarIO tv
 getTVar _ _ = error "Shared arrays unsupported"
 
-
 removeVarSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => LValue -> m ()
 removeVarSTM (LVar name) = do
   allVars <- get
   let store = shared allVars
   put $ allVars {shared = Map.delete name store}
-removeVarSTM _  = error "Illegl remove"
+removeVarSTM _ = error "Illegl remove"
 
 getTVarSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => m TVarStore -> LValue -> m (Maybe TypedVal)
 getTVarSTM getS (LVar name) = do
@@ -273,7 +210,6 @@ getTVarSTM getS (LVar name) = do
   case Map.lookup name store of
     Nothing -> return Nothing
     Just tv -> liftSTM $ Just <$> readTVar tv
-
 getTVarSTM getS (LArrInd arr' ind') = do
   arrM <- getTVarSTM getS arr'
   let arr@(Typed arrV arrT) = Maybe.fromJust arrM
@@ -282,16 +218,19 @@ getTVarSTM getS (LArrInd arr' ind') = do
     (ArrayVal vals, IntVal i, ArrayT innerT) -> return $ Just (vals !! i `as` innerT)
     _ -> return Nothing
 
-
-getVar :: (MonadError String m, MonadState Store m, MonadIO m) => GetStoreFunc m -> LValue -> m (Maybe TypedVal)
-getVar getS (LVar name) = do
-  store <- getS
-  return
-    ( Map.lookup name store
-        <|> Map.lookup name store
-    )
-getVar getS (LArrInd arr' ind') = do
-  arrM <- getVar getS arr'
+getVar :: (MonadError String m, MonadState Store m, MonadIO m) => LValue -> m (Maybe TypedVal)
+getVar (LVar name) = do
+  store <- get
+  let scopes = vars store
+  return (walkScopesList (Just scopes))
+  where
+    walkScopesList :: Maybe ScopedStore -> Maybe TypedVal
+    walkScopesList Nothing = Nothing
+    walkScopesList (Just s) = case Map.lookup name (bindings s) of
+      Nothing -> walkScopesList (parent s)
+      Just val -> Just val
+getVar (LArrInd arr' ind') = do
+  arrM <- getVar arr'
   arr@(Typed arrV arrT) <- extractMaybeOrError arrM "Cannot resolve array"
   typeGuardArr arr "Cannot index into non-array type"
   ind@(Typed indV indT) <- evalExp ind'
@@ -328,15 +267,41 @@ setTVar getS (LVar name) val = do
           put allVars {shared = map}
           return ()
       )
-setTVar _ _ _ = error "Shared arrays unsupported"
+setTVar _ _ _ = throwError "Shared arrays unsupported"
 
-setVar :: (MonadError String m, MonadState Store m, MonadIO m) => GetStoreFunc m -> UpdateStoreFunc m -> LValue -> TypedVal -> m ()
-setVar getS updateS (LVar name) val = do
-  store <- getS
-  let updatedStore = Map.insert name val store
-   in updateS updatedStore
-setVar getS updateS (LArrInd arr' ind') (Typed val valT) = do
-  arrM <- getVar getS arr'
+createVar :: (MonadError String m, MonadState Store m, MonadIO m) => LValue -> TypedVal -> m ()
+createVar (LVar name) val = do
+  store <- get
+  let updatedBindings = Map.insert name val (bindings $ vars store)
+  let updatedVars = (vars store) {bindings = updatedBindings}
+  put store {vars = updatedVars}
+createVar (LArrInd _ _) val = throwError "Cannot intialize single array element"
+
+setVar :: (MonadError String m, MonadState Store m, MonadIO m) => LValue -> TypedVal -> m ()
+setVar (LVar name) val = do
+  store <- get
+  let scopedStore = vars store
+  let (updatedScopedStore, success) = walkSetScopeChain scopedStore
+  if success
+    then put store {vars = updatedScopedStore}
+    else
+      let updatedLocalBindings = Map.insert name val (bindings scopedStore)
+          updatedStore = scopedStore {bindings = updatedLocalBindings}
+       in put store {vars = updatedStore}
+  where
+    walkSetScopeChain :: ScopedStore -> (ScopedStore, Bool)
+    walkSetScopeChain ss =
+      let scopeVarBindings = bindings ss
+          parentScope = parent ss
+       in case Map.lookup name scopeVarBindings of
+            Just _ -> (ScopedS (Map.insert name val scopeVarBindings) parentScope, True)
+            Nothing -> case parentScope of
+              Nothing -> (ss, False)
+              Just pScope ->
+                let (updatedParent, success) = walkSetScopeChain pScope
+                 in (ScopedS scopeVarBindings (Just updatedParent), success)
+setVar (LArrInd arr' ind') (Typed val valT) = do
+  arrM <- getVar arr'
 
   arr@(Typed arrV arrT) <- extractMaybeOrError arrM "Cannot resolve variable"
   ind@(Typed indV indT) <- evalExp ind'
@@ -349,38 +314,12 @@ setVar getS updateS (LArrInd arr' ind') (Typed val valT) = do
     (ArrayVal vals, IntVal i) ->
       if i < 0 || length vals <= i
         then throwError "Array index out of bounds"
-        else setVar getS updateS arr' (ArrayVal (setAtIndex vals i val) `as` arrT)
+        else setVar arr' (ArrayVal (setAtIndex vals i val) `as` arrT)
     _ -> error "ERR: Type system failure"
   where
     -- \| Credit to https://stackoverflow.com/questions/15530511/how-to-set-value-in-nth-element-in-a-haskell-list
     setAtIndex :: [a] -> Int -> a -> [a]
     setAtIndex l i v = Prelude.take i l ++ [v] ++ Prelude.drop (i + 1) l
-
--- Get/Set internal functions for KV store
-getKV :: (MonadError String m, MonadState Store m, MonadIO m) => String -> String -> m TypedVal
-getKV rowKey colKey = do
-  allVars <- get
-  let resM = do
-        row <- Map.lookup rowKey (persist allVars)
-        Map.lookup colKey row
-  extractMaybeOrError resM ("No value at " ++ rowKey ++ ", " ++ colKey)
-
-setKV :: (MonadError String m, MonadState Store m, MonadIO m) => String -> String -> TypedVal -> m ()
-setKV rowKey colKey val = do
-  allVars <- get
-  let row = Map.findWithDefault Map.empty rowKey (persist allVars)
-  let updatedRow = Map.insert colKey val row
-  let updatedKV = Map.insert rowKey updatedRow (persist allVars)
-  let updatedStore = allVars {persist = updatedKV}
-  put updatedStore
-
-existsKV :: (MonadError String m, MonadState Store m, MonadIO m) => String -> String -> m Bool
-existsKV rowKey colKey = do
-  allVars <- get
-  let resM = do
-        row <- Map.lookup rowKey (persist allVars)
-        Map.lookup colKey row
-  return (Maybe.isJust resM)
 
 -- Error Handling and Type Checking
 typeOf :: Value -> Maybe BType
@@ -446,14 +385,14 @@ evalBinopIntExp (BOp op e1 e2) opName = do
   case (v1, v2) of
     (IntVal v1', IntVal v2') -> return $ IntVal (intBinOpToF op v1' v2') `as` IntT
     (StringVal v1', IntVal v2') -> case op of
-          Add -> return $ StringVal (v1' ++ (show v2')) `as` StringT
-          _ -> error "Cannot perform this operation on strings"
+      Add -> return $ StringVal (v1' ++ (show v2')) `as` StringT
+      _ -> error "Cannot perform this operation on strings"
     (IntVal v1', StringVal v2') -> case op of
-          Add -> return $ StringVal ((show v1') ++ v2') `as` StringT
-          _ -> error "Cannot perform this operation on strings"
+      Add -> return $ StringVal ((show v1') ++ v2') `as` StringT
+      _ -> error "Cannot perform this operation on strings"
     (StringVal v1', StringVal v2') -> case op of
-          Add -> return $ StringVal (v1' ++ v2') `as` StringT
-          _ -> error "Cannot perform this operation on strings"
+      Add -> return $ StringVal (v1' ++ v2') `as` StringT
+      _ -> error "Cannot perform this operation on strings"
     _ -> error "Typeguard doesn't work as expected"
 evalBinopIntExp _ _ = error "Calling evalBinop without binop exp"
 
@@ -511,7 +450,7 @@ evalExpSTM (Val v) = case typeOf v of
   Just t -> return $ v `as` t
   _ -> error $ "Type error" ++ (show v)
 evalExpSTM (Var s) = do
-  var <- getLocalSTM False (LVar s)
+  var <- scopedGetSTM (LVar s)
   case var of
     Just v -> return v
     Nothing -> error "Using undeclared variable"
@@ -549,7 +488,7 @@ evalExp (Val v) = do
     Just t -> return $ v `as` t
     _ -> throwError $ "Type error" ++ show v
 evalExp (Var s) = do
-  var <- getLocal False (LVar s)
+  var <- scopedGet False (LVar s)
   case var of
     Just v -> return v
     Nothing -> throwError $ "Use of undeclared variable " ++ s
@@ -605,40 +544,39 @@ evalExp (UOp Not e) = do
 evalExp (FCall name args) =
   case libFuncLookup name of
     Just f -> do execLibFunc f args
-    Nothing -> do execUserFunc name args
+    Nothing -> do execNamedUserFunc name args
 
-execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => String -> [Exp] -> m TypedVal
-execUserFunc name args = do
-  allVars <- get
-  let maybeFName = Map.lookup name (locals allVars)
-  let maybeFDecl = Map.lookup name (fdecls allVars)
-  let maybeFunc = case maybeFName of
-        Just (Typed (FName fname) FNameT) -> Map.lookup fname (fdecls allVars) <|> maybeFDecl
-        _ -> maybeFDecl
-  f@(FDecl name argDecls expectedRetType body) <-
-    extractMaybeOrError
-      maybeFunc
-      ("No function" ++ name)
-  let prevLocals = locals allVars
-  let newScopedStore = allVars {locals = Map.empty}
-  newScopedStore <- setParams argDecls args
-  put allVars {locals = newScopedStore}
-  ret <- evalBlock body Local
-  allVarsUpdated <- get
-  put allVarsUpdated {locals = prevLocals}
+extractFunctionExp :: (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> m ([VarDecl], BType, Block)
+extractFunctionExp (Typed (FunctionVal vdecls retTy block) _) = do return (vdecls, retTy, block)
+extractFunctionExp _ = throwError "ERR: Cannot call non-callable object"
+
+execNamedUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => String -> [Exp] -> m TypedVal
+execNamedUserFunc name args = do
+  store <- get
+  maybeFExp <- getVar (LVar name)
+  fval <- extractMaybeOrError maybeFExp ("No function" ++ name)
+  execUserFunc fval args
+
+execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> [Exp] -> m TypedVal
+execUserFunc (Typed (FunctionVal argDecls expectedRetType body) (FuncT _ _)) args = do
+  pushNewScope
+  setLocalArgBindings argDecls args
+  ret <- evalBlock body
+  popLocalScope
   case (ret, expectedRetType) of
     (Just x@(Typed retVal retTy), _) -> return x
     (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
-    (_, _) -> throwError ("Return type for " <> name <> "doesn't match return value")
+    (_, _) -> throwError "Return type for function doesn't match return value"
   where
-    setParams :: [VarDecl] -> [Exp] -> m VarStore
-    setParams [] [] = do return Map.empty
-    setParams ((VDecl vname vshared vty) : declT) (exp : expT) = do
+    setLocalArgBindings :: [VarDecl] -> [Exp] -> m ()
+    setLocalArgBindings [] [] = do return ()
+    setLocalArgBindings ((VDecl vname vshared vty) : declT) (exp : expT) = do
       e@(Typed eVal eTy) <- evalExp exp
       typeGuard eTy vty "Argument type doesn't match function declaration"
-      rem <- setParams declT expT
-      return $ Map.insert vname e rem
-    setParams _ _ = do throwError ("Argument mismatch in call to " <> name)
+      setVar (LVar vname) e
+      setLocalArgBindings declT expT
+    setLocalArgBindings _ _ = do throwError "Argument mismatch in function call"
+execUserFunc _ _ = throwError "ERR: Attemtping to call non-callable object"
 
 execLibFunc :: (MonadError String m, MonadState Store m, MonadIO m) => ([TypedVal] -> m TypedVal) -> [Exp] -> m TypedVal
 execLibFunc f args = do
@@ -652,57 +590,57 @@ execLibFunc f args = do
       return (val : rem)
 
 -- Statement evaluation
-evalStatement :: (MonadError String m, MonadState Store m, MonadIO m) => Statement -> Scope -> m (Maybe TypedVal)
-evalStatement (Let v@(VDecl name shared t) exp) scope = do
-  exists <- scopedGet scope shared (LVar name)
+evalStatement :: (MonadError String m, MonadState Store m, MonadIO m) => Statement -> m (Maybe TypedVal)
+evalStatement (Let v@(VDecl name shared t) exp) = do
+  exists <- scopedGet shared (LVar name)
   guardWithErrorMsg (isNothing exists) "Error: redeclaring variable"
   (Typed ev et) <- evalExp exp
   typeGuard t et ("Error: incorrect type in declaration for " ++ name)
-  scopedSet scope shared (LVar name) (ev `as` t)
+  scopedCreateVar shared (LVar name) (ev `as` t)
   return Nothing
-evalStatement (Assign lval exp) scope = do
-  exists <- scopedGet scope False lval
-  (Typed currentV expectedT) <- extractMaybeOrError exists ("Error: assignment to undeclared variable" ++ show scope ++ show lval)
+evalStatement (Assign lval exp) = do
+  exists <- scopedGet False lval
+  (Typed currentV expectedT) <- extractMaybeOrError exists ("Error: assignment to undeclared variable" ++ show lval)
   e <- evalExp exp
   typeGuard (typeof e) expectedT "Error: Assignment must respect the use the same type"
-  scopedSet scope False lval e
+  scopedSet False lval e
   return Nothing
-evalStatement (Return exp) scope = do
+evalStatement (Return exp) = do
   tv <- evalExp exp
   return $ Just tv
-evalStatement (FCallStatement name args) scope = do
+evalStatement (FCallStatement name args) = do
   e <- evalExp (FCall name args)
   typeGuard (typeof e) VoidT "Calling function as statement with non-void return type"
   return Nothing
-evalStatement (If exp b1 b2) scope = do
+evalStatement (If exp b1 b2) = do
   e <- evalExp exp
   typeGuard (typeof e) BoolT "If-else expression guard must be of type bool"
   case e of
     Typed (BoolVal b) BoolT ->
       if b
-        then evalBlock b1 scope
-        else evalBlock b2 scope
+        then evalBlock b1
+        else evalBlock b2
     _ -> error "ERR: Type system internal error"
-evalStatement (While exp body) scope = do
+evalStatement (While exp body) = do
   e@(Typed expV expT) <- evalExp exp
   typeGuard (typeof e) BoolT "Error: guard of while loop must be boolean type"
   case expV of
     BoolVal b ->
       if b
         then do
-          val <- evalBlock body scope
+          val <- evalBlock body
           case val of
-            Nothing -> evalStatement (While exp body) scope
+            Nothing -> evalStatement (While exp body)
             Just x -> return $ Just x
         else return Nothing
     _ -> error "ERR: Type system internal error"
-evalStatement (Atomic block) scope = do
+evalStatement (Atomic block) = do
   allVars <- get
-  (value, store) <- liftIO $ atomically (runStateT (evalBlockSTM block scope) allVars)
+  (value, store) <- liftIO $ atomically (runStateT (evalBlockSTM block) allVars)
   return value
-evalStatement (ForIn vdecl@(VDecl n b t) exp body) scope = do
+evalStatement (ForIn vdecl@(VDecl n b t) exp body) = do
   v@(Typed expV expT) <- evalExp exp
-  currentIterBind <- scopedGet scope b (LVar n)
+  currentIterBind <- scopedGet b (LVar n)
   case (expT, expV) of
     (ArrayT innerT, ArrayVal vals) ->
       if t /= innerT
@@ -715,56 +653,57 @@ evalStatement (ForIn vdecl@(VDecl n b t) exp body) scope = do
   where
     execForEach :: (MonadError String m, MonadState Store m, MonadIO m) => VarDecl -> [Value] -> Block -> m (Maybe TypedVal)
     execForEach vd@(VDecl iterName shared iterType) (h : t) body = do
-      scopedSet scope shared (LVar iterName) (h `as` iterType)
-      res <- evalBlock body scope
-      scopedRemove scope (LVar iterName)
+      pushNewScope
+      createVar (LVar iterName) (h `as` iterType)
+      res <- evalBlock body
+      popLocalScope
       case res of
         Nothing -> execForEach vd t body
-        Just x -> return (Just x)
+        Just x -> return $ Just x
     execForEach _ [] _ = do return Nothing
 
-evalStatementSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Statement -> Scope -> m (Maybe TypedVal)
-evalStatementSTM (Let v@(VDecl name shared t) exp) scope = do
-  exists <- scopedGetSTM scope shared (LVar name)
+evalStatementSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Statement -> m (Maybe TypedVal)
+evalStatementSTM (Let v@(VDecl name shared t) exp) = do
+  exists <- scopedGetSTM (LVar name)
   (Typed ev et) <- evalExpSTM exp
-  scopedSetSTM scope shared (LVar name) (ev `as` t)
+  scopedSetSTM (LVar name) (ev `as` t)
   return Nothing
-evalStatementSTM (Assign lval exp) scope = do
-  exists <- scopedGetSTM scope False lval
+evalStatementSTM (Assign lval exp) = do
+  exists <- scopedGetSTM lval
   let (Typed currentV expectedT) = Maybe.fromJust exists
   e <- evalExpSTM exp
-  scopedSetSTM scope False lval e
+  scopedSetSTM lval e
   return Nothing
-evalStatementSTM (Return exp) scope = do
+evalStatementSTM (Return exp) = do
   tv <- evalExpSTM exp
   return $ Just tv
-evalStatementSTM (FCallStatement name args) scope = do
+evalStatementSTM (FCallStatement name args) = do
   e <- evalExpSTM (FCall name args)
   return Nothing
-evalStatementSTM (If exp b1 b2) scope = do
+evalStatementSTM (If exp b1 b2) = do
   e <- evalExpSTM exp
   case e of
     Typed (BoolVal b) BoolT ->
       if b
-        then evalBlockSTM b1 scope
-        else evalBlockSTM b2 scope
+        then evalBlockSTM b1
+        else evalBlockSTM b2
     _ -> error "ERR: Type system internal error"
-evalStatementSTM (While exp body) scope = do
+evalStatementSTM (While exp body) = do
   e@(Typed expV expT) <- evalExpSTM exp
   case expV of
     BoolVal b ->
       if b
         then do
-          val <- evalBlockSTM body scope
+          val <- evalBlockSTM body
           case val of
-            Nothing -> evalStatementSTM (While exp body) scope
+            Nothing -> evalStatementSTM (While exp body)
             Just x -> return $ Just x
         else return Nothing
     _ -> error "ERR: Type system internal error"
-evalStatementSTM (Atomic block) scope = error "Calling atomic within atomic"
-evalStatementSTM (ForIn vdecl@(VDecl n b t) exp body) scope = do
+evalStatementSTM (Atomic block) = error "Calling atomic within atomic"
+evalStatementSTM (ForIn vdecl@(VDecl n b t) exp body) = do
   v@(Typed expV expT) <- evalExpSTM exp
-  currentIterBind <- scopedGetSTM scope b (LVar n)
+  currentIterBind <- scopedGetSTM (LVar n)
   case (expT, expV) of
     (ArrayT innerT, ArrayVal vals) ->
       if t /= innerT
@@ -777,37 +716,45 @@ evalStatementSTM (ForIn vdecl@(VDecl n b t) exp body) scope = do
   where
     execForEach :: (MonadSTM m, MonadState Store m, MonadIO m) => VarDecl -> [Value] -> Block -> m (Maybe TypedVal)
     execForEach vd@(VDecl iterName shared iterType) (h : t) body = do
-      scopedSetSTM scope shared (LVar iterName) (h `as` iterType)
-      res <- evalBlockSTM body scope
-      scopedRemoveSTM scope (LVar iterName)
+      scopedSetSTM (LVar iterName) (h `as` iterType)
+      res <- evalBlockSTM body
+      scopedRemoveSTM (LVar iterName)
       case res of
         Nothing -> execForEach vd t body
         Just x -> return (Just x)
     execForEach _ [] _ = do return Nothing
 
-evalBlockSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Block -> Scope -> m (Maybe TypedVal)
-evalBlockSTM (Block []) scope = return Nothing
-evalBlockSTM (Block (h : t)) scope = do
-  res <- evalStatementSTM h scope
+evalBlockSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Block -> m (Maybe TypedVal)
+evalBlockSTM (Block []) = return Nothing
+evalBlockSTM (Block (h : t)) = do
+  res <- evalStatementSTM h
   case res of
-    Nothing -> evalBlockSTM (Block t) scope
+    Nothing -> evalBlockSTM (Block t)
     _ -> return res
 
-evalBlock :: (MonadError String m, MonadState Store m, MonadIO m) => Block -> Scope -> m (Maybe TypedVal)
-evalBlock (Block []) scope = do return Nothing
-evalBlock (Block (h : t)) scope = do
-  res <- evalStatement h scope
+evalBlock :: (MonadError String m, MonadState Store m, MonadIO m) => Block -> m (Maybe TypedVal)
+evalBlock (Block []) = do return Nothing
+evalBlock (Block (h : t)) = do
+  res <- evalStatement h
   case res of
-    Nothing -> evalBlock (Block t) scope
+    Nothing -> evalBlock (Block t)
     _ -> return res
 
 evalQuery :: (MonadError String m, MonadState Store m, MonadIO m) => Query -> m (Maybe TypedVal)
 evalQuery (Query fdecls main) = do
-  let ftable = Map.fromList (map (\f@(FDecl name _ _ _) -> (name, f)) fdecls)
-      initStore = emptyStore {fdecls = ftable}
+  let initBindings = Map.fromList (map aux fdecls)
+      initScopedVars = ScopedS {bindings = initBindings, parent = Nothing}
+      initStore = emptyStore {vars = initScopedVars}
    in do
         put initStore
-        evalBlock main Global
+        evalBlock main
+  where
+    aux :: FDecl -> (String, TypedVal)
+    aux (FDecl name vdecls retTy block) =
+      let argTypes = map (\(VDecl _ _ argTy) -> argTy) vdecls
+          fType = FuncT retTy argTypes
+          fValue = FunctionVal vdecls retTy block
+       in (name, fValue `as` fType)
 
 -- Library Functions
 libFuncLookup :: (MonadError String m, MonadState Store m, MonadIO m) => String -> Maybe ([TypedVal] -> m TypedVal)
@@ -817,7 +764,7 @@ libFuncLookup "len" = Just libArrayLen
 libFuncLookup "range" = Just libRange
 libFuncLookup "fork" = Just libFork
 libFuncLookup "wait" = Just libWait
-libFuncLookup "print"= Just libPrint
+libFuncLookup "print" = Just libPrint
 libFuncLookup x = Nothing
 
 guardTypes :: (MonadError String m, MonadState Store m, MonadIO m) => [TypedVal] -> [BType] -> String -> m ()
@@ -865,21 +812,22 @@ libRange args = do
     (IntT, IntVal i) -> return $ (ArrayVal (IntVal <$> take i [0 ..]) `as` ArrayT IntT)
     _ -> throwError "ERR: Type system internal failure"
 
-execIO name store =
+execIO :: (MonadIO m) => TypedVal -> Store -> m ()
+execIO fval store =
   do
-    (evalRes, finalStore) <- runStateT (runExceptT (execUserFunc name [])) store
+    (evalRes, finalStore) <- runStateT (runExceptT (execUserFunc fval [])) store
     case evalRes of
       Left evalErr -> error "Forked function failed"
       Right res -> return ()
 
 libFork :: (MonadError String m, MonadState Store m, MonadIO m) => [TypedVal] -> m TypedVal
 libFork args = do
-  guardTypes args [FNameT] "fork"
-  let (Typed v1 t1) = args !! 0
+  -- TODO : Type guards
+  let typedFVal@(Typed v1 t1) = args !! 0
   case (t1, v1) of
-    (FNameT, FName name) -> do
+    (FuncT _ _, FunctionVal vdecls retTy block) -> do
       allVars <- get
-      async <- liftIO $ async (execIO name allVars)
+      async <- liftIO $ async (execIO typedFVal allVars)
       let threads' = async : threads allVars
       put allVars {threads = threads'}
       return $ StringVal (show $ asyncThreadId async) `as` StringT
@@ -906,14 +854,14 @@ libPrint args = do
   let (Typed v1 t1) = args !! 0
   case (t1, v1) of
     (BoolT, BoolVal b) -> do
-        liftIO $ print b
-        return $ IntVal 0 `as` VoidT
+      liftIO $ print b
+      return $ IntVal 0 `as` VoidT
     (IntT, IntVal i) -> do
-        liftIO $ print i
-        return $ IntVal 0 `as` VoidT
+      liftIO $ print i
+      return $ IntVal 0 `as` VoidT
     (StringT, StringVal s) -> do
-        liftIO $ print s
-        return $ IntVal 0 `as` VoidT
+      liftIO $ print s
+      return $ IntVal 0 `as` VoidT
     _ -> throwError "ERR: Type system internal failure"
 
 evalQueryFile :: String -> IO (Either String (Maybe TypedVal))
