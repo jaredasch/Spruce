@@ -129,7 +129,7 @@ initScope = ScopedS {bindings = Map.empty, parent = Nothing}
 emptyStore :: Store
 emptyStore = St {vars = initScope, fdecls = Map.empty, shared = Map.empty, threads = []}
 
-popLocalScope :: (MonadError String m, MonadState Store m, MonadIO m) => m ()
+popLocalScope :: (MonadState Store m, MonadIO m) => m ()
 popLocalScope = do
   store <- get
   let scoped = vars store
@@ -137,7 +137,7 @@ popLocalScope = do
     Just p -> put store {vars = p}
     Nothing -> error "Trying to unwind empty scope stack"
 
-pushNewScope :: (MonadError String m, MonadState Store m, MonadIO m) => m ()
+pushNewScope :: (MonadState Store m, MonadIO m) => m ()
 pushNewScope = do
   store <- get
   let scopedVars = vars store
@@ -614,12 +614,15 @@ evalStatement (FCallStatement name args) = do
 evalStatement (If exp b1 b2) = do
   e <- evalExp exp
   typeGuard (typeof e) BoolT "If-else expression guard must be of type bool"
-  case e of
+  pushNewScope
+  x <- case e of
     Typed (BoolVal b) BoolT ->
       if b
         then evalBlock b1
         else evalBlock b2
     _ -> error "ERR: Type system internal error"
+  popLocalScope
+  return x
 evalStatement (While exp body) = do
   e@(Typed expV expT) <- evalExp exp
   typeGuard (typeof e) BoolT "Error: guard of while loop must be boolean type"
@@ -627,7 +630,9 @@ evalStatement (While exp body) = do
     BoolVal b ->
       if b
         then do
+          pushNewScope
           val <- evalBlock body
+          popLocalScope
           case val of
             Nothing -> evalStatement (While exp body)
             Just x -> return $ Just x
@@ -644,10 +649,7 @@ evalStatement (ForIn vdecl@(VDecl n b t) exp body) = do
     (ArrayT innerT, ArrayVal vals) ->
       if t /= innerT
         then throwError "Error: Variable delcaration in for-each doesn't match expression"
-        else
-          if Maybe.isJust currentIterBind
-            then throwError "Error: Bound variable in for-each loop already exists in scope"
-            else execForEach vdecl vals body
+        else execForEach vdecl vals body
     _ -> throwError "Error: cannot iterate over non-array type"
   where
     execForEach :: (MonadError String m, MonadState Store m, MonadIO m) => VarDecl -> [Value] -> Block -> m (Maybe TypedVal)
@@ -681,19 +683,24 @@ evalStatementSTM (FCallStatement name args) = do
   return Nothing
 evalStatementSTM (If exp b1 b2) = do
   e <- evalExpSTM exp
-  case e of
+  pushNewScope
+  tmp <- case e of
     Typed (BoolVal b) BoolT ->
       if b
         then evalBlockSTM b1
         else evalBlockSTM b2
     _ -> error "ERR: Type system internal error"
+  popLocalScope
+  return tmp
 evalStatementSTM (While exp body) = do
   e@(Typed expV expT) <- evalExpSTM exp
   case expV of
     BoolVal b ->
       if b
         then do
+          pushNewScope
           val <- evalBlockSTM body
+          popLocalScope
           case val of
             Nothing -> evalStatementSTM (While exp body)
             Just x -> return $ Just x
@@ -702,15 +709,11 @@ evalStatementSTM (While exp body) = do
 evalStatementSTM (Atomic block) = error "Calling atomic within atomic"
 evalStatementSTM (ForIn vdecl@(VDecl n b t) exp body) = do
   v@(Typed expV expT) <- evalExpSTM exp
-  currentIterBind <- scopedGetSTM (LVar n)
   case (expT, expV) of
     (ArrayT innerT, ArrayVal vals) ->
       if t /= innerT
         then error "Error: Variable delcaration in for-each doesn't match expression"
-        else
-          if Maybe.isJust currentIterBind
-            then error "Error: Bound variable in for-each loop already exists in scope"
-            else execForEach vdecl vals body
+        else execForEach vdecl vals body
     _ -> error "Error: cannot iterate over non-array type"
   where
     execForEach :: (MonadSTM m, MonadState Store m, MonadIO m) => VarDecl -> [Value] -> Block -> m (Maybe TypedVal)
