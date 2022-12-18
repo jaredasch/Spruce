@@ -185,15 +185,6 @@ removeVar getS updateS (LVar name) = do
   updateS (Map.delete name store)
 removeVar _ _ _ = error "Cannot remove arbitrary array variables"
 
-getFunc :: (MonadError String m, MonadState Store m, MonadIO m) => LValue -> m (Maybe TypedVal)
-getFunc (LVar name) = do
-  allVars <- get
-  let funcs = fdecls allVars
-  case Map.lookup name funcs of
-    Just f -> return $ Just $ Typed (FName name) FNameT
-    Nothing -> return Nothing
-getFunc _ = error "Array indices cannot be a functions"
-
 getTVar :: (MonadError String m, MonadState Store m, MonadIO m) => m TVarStore -> LValue -> m (Maybe TypedVal)
 getTVar getS (LVar name) = do
   store <- getS
@@ -330,7 +321,6 @@ setVar (LArrInd arr' ind') (Typed val valT) = do
 typeOf :: Value -> Maybe BType
 typeOf (BoolVal _) = Just BoolT
 typeOf (IntVal _) = Just IntT
-typeOf (FName _) = Just FNameT
 typeOf (StringVal _) = Just StringT
 typeOf (ArrayVal []) = Just $ ArrayT AnyT
 typeOf (ArrayVal [h]) = typeOf h
@@ -340,6 +330,9 @@ typeOf (ArrayVal (h : t)) = do
   case tType of
     ArrayT inner -> if inner == hType then Just tType else Nothing
     _ -> Nothing
+typeOf (FunctionVal vdecls retTy block) =
+  let argTypes = map (\(VDecl name _ ty) -> ty) vdecls
+   in Just $ FuncT retTy argTypes
 
 guardWithErrorMsg :: (MonadError String m, MonadState Store m, MonadIO m) => Bool -> String -> m ()
 guardWithErrorMsg b m = do if b then return () else throwError m
@@ -354,6 +347,7 @@ extractMaybeOrError x msg = do
 typeGuard :: (MonadError String m, MonadState Store m, MonadIO m) => BType -> BType -> String -> m ()
 typeGuard _ AnyT m = do return ()
 typeGuard (ArrayT t) (ArrayT t') m = typeGuard t t' m
+typeGuard FuncAny (FuncT _ _) _ = do return ()
 typeGuard t t' m = if t == t' then return () else throwError m
 
 typeGuardArr :: (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> String -> m ()
@@ -563,7 +557,7 @@ execNamedUserFunc name args = do
   execUserFunc fval args
 
 execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> [Exp] -> m TypedVal
-execUserFunc (Typed (FunctionVal argDecls expectedRetType body) (FuncT _ _)) args = do
+execUserFunc (Typed (FunctionVal argDecls expectedRetType body) _) args = do
   pushNewScope
   setLocalArgBindings argDecls args
   ret <- evalBlock body
@@ -581,7 +575,7 @@ execUserFunc (Typed (FunctionVal argDecls expectedRetType body) (FuncT _ _)) arg
       setVar (LVar vname) e
       setLocalArgBindings declT expT
     setLocalArgBindings _ _ = do throwError "Argument mismatch in function call"
-execUserFunc _ _ = throwError "ERR: Attemtping to call non-callable object"
+execUserFunc v _ = throwError $ "ERR: Attemtping to call non-callable object" <> (show v)
 
 execLibFunc :: (MonadError String m, MonadState Store m, MonadIO m) => ([TypedVal] -> m TypedVal) -> [Exp] -> m TypedVal
 execLibFunc f args = do

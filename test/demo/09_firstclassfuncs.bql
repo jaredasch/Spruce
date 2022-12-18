@@ -1,0 +1,7 @@
+func plusOne (x : int) -> int {
+    let add : function = func (x : int) -> int {return x+2;};
+    let sub : function = func (x : int) -> int {return x-1;};
+    return add(sub(x));
+}
+
+return plusOne(1);

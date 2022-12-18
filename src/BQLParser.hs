@@ -23,8 +23,8 @@ data BType
   | IntT
   | StringT
   | ArrayT BType
-  | FNameT
-  | FuncT BType [BType]
+  | FuncAny -- Used for parsing
+  | FuncT BType [BType] -- Used for internal type checking
   | AnyT -- Only to be used internally with empty arrays, can't be used by users
   deriving (Show, Eq)
 
@@ -62,7 +62,6 @@ data Value
   | IntVal Int
   | StringVal String
   | ArrayVal [Value]
-  | FName String
   | FunctionVal [VarDecl] BType Block
   deriving (Show, Eq)
 
@@ -118,7 +117,7 @@ inBracketsP p = P.between (P.string "[") p (P.string "]")
 
 ----- Value Parsing -----
 valueP :: Parser Value
-valueP = intValP <|> stringValP <|> boolValP <|> arrayValP
+valueP = funcValP <|> intValP <|> stringValP <|> boolValP <|> arrayValP
 
 intValP :: Parser Value
 intValP = IntVal <$> wsP P.int
@@ -132,15 +131,19 @@ boolValP = BoolVal <$> (constP "true" True <|> constP "false" False)
 arrayValP :: Parser Value
 arrayValP = ArrayVal <$> P.between (P.string "[") (P.sepBy valueP (wsP $ P.string ",")) (P.string "]")
 
+funcValP :: Parser Value
+funcValP =
+  FunctionVal
+    <$> (trimP (P.string "func") *> trimP (inParensP (P.sepBy typedVarP (trimP (P.string ",")))))
+    <*> (trimP (P.string "->") *> typeP)
+    <*> trimP (inBracesP blockP)
+
 ----- Type Parsing -----
 typeP :: Parser BType
 typeP = intTypeP <|> stringTypeP <|> boolTypeP <|> arrayTypeP <|> voidTypeP <|> funcTypeP
 
 intTypeP :: Parser BType
 intTypeP = wsP (P.string "int") $> IntT
-
-funcTypeP :: Parser BType
-funcTypeP = wsP (P.string "fname") $> FNameT
 
 stringTypeP :: Parser BType
 stringTypeP = wsP (P.string "string") $> StringT
@@ -150,6 +153,9 @@ boolTypeP = wsP (P.string "bool") $> BoolT
 
 voidTypeP :: Parser BType
 voidTypeP = wsP (P.string "void") $> VoidT
+
+funcTypeP :: Parser BType
+funcTypeP = wsP (P.string "function") $> FuncAny
 
 arrayTypeP :: Parser BType
 arrayTypeP = ArrayT <$> P.between (P.string "[") typeP (P.string "]")
@@ -373,10 +379,9 @@ instance PP BType where
   pp StringT = PP.text "string"
   pp (ArrayT t) = PP.brackets $ pp t
   pp AnyT = PP.text "any"
-  pp FNameT = PP.text "fname"
+  pp FuncAny = PP.text "func"
 
 instance PP Value where
-  pp (FName s) = PP.char '"' <> PP.text s <> PP.char '"'
   pp (IntVal i) = PP.int i
   pp (StringVal s) = PP.char '"' <> (PP.text s) <> PP.char '"'
   pp (BoolVal b) = pp b
