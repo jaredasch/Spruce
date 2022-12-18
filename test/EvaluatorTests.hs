@@ -68,6 +68,8 @@ evalTestSuite =
       "test/queries/global_local_naming_conflict.bql" $=$ evalError "Error: redeclaring variable",
       "test/queries/nested_if.bql" $=$ int (-1),
       "test/queries/bad_scoping.bql" $=$ evalError "Use of undeclared variable i",
+      "test/queries/fib.bql" $=$ returnVal (ArrayVal (IntVal <$> [89, 144, 233]) `as` ArrayT IntT),
+      "test/queries/memoized_fib.bql" $=$ returnVal (ArrayVal (IntVal <$> [89, 144, 233]) `as` ArrayT IntT),
       "test/demo/01_types.bql" $=$ int 55,
       "test/demo/02_arrays.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/03_functions.bql" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
@@ -76,5 +78,6 @@ evalTestSuite =
       "test/demo/07_atomic.bql" $=$ int 6000,
       "test/demo/09_firstclassfuncs.bql" $=$ int 2,
       "test/demo/10_scoping_complex.bql" $=$ int 165,
-      "test/demo/11_closures.bql" $=$ int 3
+      "test/demo/11_closures.bql" $=$ int 3,
+      "test/demo/12_closures_array.bql" $=$ int 2
     ]

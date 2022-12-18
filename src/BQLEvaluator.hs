@@ -648,6 +648,8 @@ evalStatement (While exp body) = do
         then do
           pushNewScope
           val <- evalBlock body
+          -- store <- get
+          -- error (show (vars store))
           popLocalScope
           case val of
             Nothing -> evalStatement (While exp body)
@@ -879,7 +881,7 @@ libPrint args = do
     (StringT, StringVal s) -> do
       liftIO $ print s
       return $ IntVal 0 `as` VoidT
-    _ -> throwError "ERR: Type system internal failure"
+    _ -> throwError "Can't print array types"
 
 evalQueryFile :: String -> IO (Either String (Maybe TypedVal))
 evalQueryFile fname = do

@@ -1,0 +1,18 @@
+let makeFib : function = func () -> int {
+    let memo : [int] = [1, 1];
+    let fib : function = func (n : int) -> int {
+        if (len(memo) > n) {
+            return memo[n];
+        } else {
+            while (len(memo) <= n) {
+                let res : int = memo[len(memo)-1] + memo[len(memo)-2];
+                memo = appendBack(res, memo);
+            }
+        }
+        return memo[n];
+    };
+    return fib;
+};
+
+let fib : function = makeFib();
+return [fib(10), fib(11), fib(12)];
