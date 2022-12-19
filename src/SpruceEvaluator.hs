@@ -884,6 +884,14 @@ libWait args = do
         Nothing -> throwError "Waiting for non existent thread!"
     _ -> throwError "ERR: Type system internal failure"
 
+toString :: Value -> String
+toString x = case x of
+  BoolVal b -> show b
+  IntVal i -> show i
+  StringVal s -> s
+  ArrayVal a -> show $ map toString a
+  _ -> error "Printing an invalid type"
+
 libPrint :: (MonadError String m, MonadState Store m, MonadIO m) => [TypedVal] -> m TypedVal
 libPrint args = do
   let (Typed v1 t1) = args !! 0
@@ -897,7 +905,10 @@ libPrint args = do
     (StringT, StringVal s) -> do
       liftIO $ print s
       return $ IntVal 0 `as` VoidT
-    _ -> throwError "Can't print array types"
+    (ArrayT _, ArrayVal l) -> do
+      liftIO $ print $ map toString l
+      return $ IntVal 0 `as` VoidT
+    _ -> throwError "Can't print this type"
 
 evalProgramFile :: String -> IO (Either String (Maybe TypedVal))
 evalProgramFile fname = do
