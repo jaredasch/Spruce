@@ -365,6 +365,7 @@ boolOpToF And = (&&)
 boolOpToF Or = (||)
 boolOpToF _ = error "ERR: Calling boolOpToF with non-bool op"
 
+-- | Evaluates integer comparison expression
 evalBinopIntExp :: (MonadError String m, MonadState Store m, MonadIO m) => Exp -> String -> m TypedVal
 evalBinopIntExp (BOp op e1 e2) opName = do
   e1'@(Typed v1 t1) <- evalExp e1
@@ -383,6 +384,7 @@ evalBinopIntExp (BOp op e1 e2) opName = do
     _ -> error "Typeguard doesn't work as expected"
 evalBinopIntExp _ _ = error "Calling evalBinop without binop exp"
 
+-- | Evaluates integer comparison expression atomically
 evalBinopIntExpSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Exp -> String -> m TypedVal
 evalBinopIntExpSTM (BOp op e1 e2) opName = do
   e1'@(Typed v1 t1) <- evalExpSTM e1
@@ -392,6 +394,7 @@ evalBinopIntExpSTM (BOp op e1 e2) opName = do
     _ -> error "Typeguard doesn't work as expected"
 evalBinopIntExpSTM _ _ = error "Calling evalBinop without binop exp"
 
+-- | Evaluates comparison expression atomically
 evalCompExpSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Exp -> String -> m TypedVal
 evalCompExpSTM (BOp op e1 e2) opName = do
   e1'@(Typed v1 t1) <- evalExpSTM e1
@@ -401,6 +404,7 @@ evalCompExpSTM (BOp op e1 e2) opName = do
     _ -> error "Typeguard doesn't work as expected"
 evalCompExpSTM _ _ = error "Calling evalCompExp without comp exp"
 
+-- | Evaluates comparison expression
 evalCompExp :: (MonadError String m, MonadState Store m, MonadIO m) => Exp -> String -> m TypedVal
 evalCompExp (BOp op e1 e2) opName = do
   e1'@(Typed v1 t1) <- evalExp e1
@@ -412,6 +416,7 @@ evalCompExp (BOp op e1 e2) opName = do
     _ -> error "Typeguard doesn't work as expected"
 evalCompExp _ _ = error "Calling evalCompExp without comp exp"
 
+-- | Evaluates boolean operand expression atomically
 evalBoolOpExpSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Exp -> String -> m TypedVal
 evalBoolOpExpSTM (BOp op e1 e2) opName = do
   e1'@(Typed v1 t1) <- evalExpSTM e1
@@ -421,6 +426,7 @@ evalBoolOpExpSTM (BOp op e1 e2) opName = do
     _ -> error "Typeguard doesn't work as expected"
 evalBoolOpExpSTM _ _ = error "Calling evalCompExp without comp exp"
 
+-- | Evaluates boolean operand expression non-atomically
 evalBoolOpExp :: (MonadError String m, MonadState Store m, MonadIO m) => Exp -> String -> m TypedVal
 evalBoolOpExp (BOp op e1 e2) opName = do
   e1'@(Typed v1 t1) <- evalExp e1
@@ -432,6 +438,7 @@ evalBoolOpExp (BOp op e1 e2) opName = do
     _ -> error "Typeguard doesn't work as expected"
 evalBoolOpExp _ _ = error "Calling evalCompExp without comp exp"
 
+-- | Evaluates expression within STM context to ensure atomicity
 evalExpSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Exp -> m TypedVal
 evalExpSTM (Val v) = case typeOf v of
   Just t -> return $ v `as` t
@@ -468,7 +475,7 @@ evalExpSTM (UOp Not e) = do
     _ -> error "Typeguard doesn't work as expected"
 evalExpSTM (FCall name args) = error "You cannot call functions in shared memory"
 
--- Main logic for expression evaluation
+-- | Expression evaluation in non-STM context
 evalExp :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => Exp -> m TypedVal
 evalExp (Val v@(FunctionVal vdecls retTy body)) = do
   currentLocalScope <- getNonGlobalScope
@@ -539,10 +546,12 @@ evalExp (FCall name args) =
     Just f -> do execLibFunc f args
     Nothing -> do execNamedUserFunc name args
 
+-- | Helper function to get Function information from TyoedVals
 extractFunctionExp :: (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> m ([VarDecl], BType, Block)
 extractFunctionExp (Typed (FunctionVal vdecls retTy block) _) = do return (vdecls, retTy, block)
 extractFunctionExp _ = throwError "ERR: Cannot call non-callable object"
 
+-- | Executes user function from name, looks up variable and calls execUserFunc
 execNamedUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => String -> [Exp] -> m TypedVal
 execNamedUserFunc name args = do
   store <- get
@@ -550,6 +559,7 @@ execNamedUserFunc name args = do
   fval <- extractMaybeOrError maybeFExp ("No function" ++ name)
   execUserFunc fval args
 
+-- | Executes a user function from a typed value
 execUserFunc :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> [Exp] -> m TypedVal
 execUserFunc (Typed (FunctionClosure argDecls expectedRetType body env locM) t) args = do
   store <- get
@@ -594,6 +604,7 @@ execUserFunc (Typed (FunctionClosure argDecls expectedRetType body env locM) t) 
     setLocalArgBindings _ _ = do throwError "Argument mismatch in function call"
 execUserFunc v _ = throwError $ "ERR: Attemtping to call non-callable object" <> (show v)
 
+-- | Executes Spruce native function
 execLibFunc :: (MonadError String m, MonadState Store m, MonadIO m) => ([TypedVal] -> m TypedVal) -> [Exp] -> m TypedVal
 execLibFunc f args = do
   argVals <- foldr aux (return []) args
@@ -648,8 +659,6 @@ evalStatement (While exp body) = do
         then do
           pushNewScope
           val <- evalBlock body
-          -- store <- get
-          -- error (show (vars store))
           popLocalScope
           case val of
             Nothing -> evalStatement (While exp body)
@@ -680,6 +689,7 @@ evalStatement (ForIn vdecl@(VDecl n b t) exp body) = do
         Just x -> return $ Just x
     execForEach _ [] _ = do return Nothing
 
+-- | Evaluate statement atomically
 evalStatementSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Statement -> m (Maybe TypedVal)
 evalStatementSTM (Let v@(VDecl name shared t) exp) = do
   exists <- scopedGetSTM (LVar name)
@@ -743,6 +753,7 @@ evalStatementSTM (ForIn vdecl@(VDecl n b t) exp body) = do
         Just x -> return (Just x)
     execForEach _ [] _ = do return Nothing
 
+-- | Evaluates block atomically
 evalBlockSTM :: (MonadSTM m, MonadState Store m, MonadIO m) => Block -> m (Maybe TypedVal)
 evalBlockSTM (Block []) = return Nothing
 evalBlockSTM (Block (h : t)) = do
@@ -751,6 +762,7 @@ evalBlockSTM (Block (h : t)) = do
     Nothing -> evalBlockSTM (Block t)
     _ -> return res
 
+-- | Evaluates block non-atomically
 evalBlock :: (MonadError String m, MonadState Store m, MonadIO m) => Block -> m (Maybe TypedVal)
 evalBlock (Block []) = do return Nothing
 evalBlock (Block (h : t)) = do
@@ -759,6 +771,7 @@ evalBlock (Block (h : t)) = do
     Nothing -> evalBlock (Block t)
     _ -> return res
 
+-- | Evalduates entire program
 evalProgram :: (MonadError String m, MonadState Store m, MonadIO m) => Program -> m (Maybe TypedVal)
 evalProgram (Program fdecls main) = do
   let initBindings = Map.fromList (map aux fdecls)
@@ -775,7 +788,9 @@ evalProgram (Program fdecls main) = do
           fValue = FunctionClosure vdecls retTy block (ScopedS Map.empty Nothing) Nothing
        in (name, fValue `as` fType)
 
--- Library Functions
+-- Native (library) functions
+
+-- | Lookup native function by name
 libFuncLookup :: (MonadError String m, MonadState Store m, MonadIO m) => String -> Maybe ([TypedVal] -> m TypedVal)
 libFuncLookup "appendFront" = Just libAppendFront
 libFuncLookup "appendBack" = Just libAppendBack
@@ -786,6 +801,7 @@ libFuncLookup "wait" = Just libWait
 libFuncLookup "print" = Just libPrint
 libFuncLookup x = Nothing
 
+-- | Ensure that types of TypedVals aligns with given types 
 guardTypes :: (MonadError String m, MonadState Store m, MonadIO m) => [TypedVal] -> [BType] -> String -> m ()
 guardTypes [] [] fname = do return ()
 guardTypes ((Typed v t) : valT) (tyH : tyT) fname = do
