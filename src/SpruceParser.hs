@@ -300,6 +300,7 @@ instance PP BType where
   pp (ArrayT t) = PP.brackets $ pp t
   pp AnyT = PP.text "any"
   pp FuncAny = PP.text "func"
+  pp (FuncT _ _) = PP.text "function"
 
 instance PP Value where
   pp (IntVal i) = PP.int i
@@ -309,6 +310,14 @@ instance PP Value where
     where
       joinBy :: Doc -> [Doc] -> Doc
       joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
+  pp (FunctionVal argDecls retTy body) =
+    PP.text "func " <> PP.parens (joinBy PP.comma (map pp argDecls)) <> PP.text " {"
+      PP.$$ PP.nest 4 (pp body)
+      PP.$$ PP.text "}"
+    where
+      joinBy :: Doc -> [Doc] -> Doc
+      joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
+  pp (FunctionClosure argDecls retTy body _ _) = pp $ FunctionVal argDecls retTy body
 
 instance PP LValue where
   pp (LVar s) = PP.text s
@@ -466,10 +475,10 @@ genStatementMaxDepth n =
   QC.oneof
     [ Let <$> arbitrary <*> arbitrary,
       Assign <$> arbitrary <*> arbitrary,
-      If <$> (genSizedExp 4) <*> genBlockMaxDepth (n - 1) <*> genBlockMaxDepth (n - 1),
+      If <$> genSizedExp 4 <*> genBlockMaxDepth (n - 1) <*> genBlockMaxDepth (n - 1),
       Return <$> arbitrary,
       FCallStatement <$> genString <*> QC.vectorOf 4 (genSizedExp 2),
-      While <$> (genSizedExp 4) <*> genBlockMaxDepth (n - 1),
+      While <$> genSizedExp 4 <*> genBlockMaxDepth (n - 1),
       ForIn <$> arbitrary <*> genSizedExp 4 <*> genBlockMaxDepth (n - 1),
       Atomic <$> genBlockMaxDepth (n - 1)
     ]
