@@ -33,7 +33,7 @@ data Statement
   | Let VarDecl Exp
   | If Exp Block Block
   | Return Exp
-  | FCallStatement String [Exp]
+  | FCallStatement Exp [Exp]
   | While Exp Block
   | ForIn VarDecl Exp Block
   | Atomic Block
@@ -46,7 +46,7 @@ data Exp
   | ArrCons [Exp]
   | BOp Bop Exp Exp
   | UOp Uop Exp
-  | FCall String [Exp]
+  | FCall Exp [Exp]
   deriving (Show, Eq)
 
 data Value

@@ -473,7 +473,7 @@ evalExpSTM (UOp Not e) = do
   case v1 of
     BoolVal v1' -> return $ BoolVal (not v1') `as` BoolT
     _ -> error "Typeguard doesn't work as expected"
-evalExpSTM (FCall name args) = error "You cannot call functions in shared memory"
+evalExpSTM (FCall _ _) = error "You cannot call functions in shared memory"
 
 -- | Expression evaluation in non-STM context
 evalExp :: forall m. (MonadError String m, MonadState Store m, MonadIO m) => Exp -> m TypedVal
@@ -541,10 +541,13 @@ evalExp (UOp Not e) = do
   case v1 of
     BoolVal v1' -> return $ BoolVal (not v1') `as` BoolT
     _ -> error "Typeguard doesn't work as expected"
-evalExp (FCall name args) =
+evalExp (FCall (Var name) args) =
   case libFuncLookup name of
     Just f -> do execLibFunc f args
     Nothing -> do execNamedUserFunc name args
+evalExp (FCall fexp args) = do
+  fval <- evalExp fexp
+  execUserFunc fval args
 
 -- | Helper function to get Function information from TyoedVals
 extractFunctionExp :: (MonadError String m, MonadState Store m, MonadIO m) => TypedVal -> m ([VarDecl], BType, Block)
@@ -635,8 +638,8 @@ evalStatement (Assign lval exp) = do
 evalStatement (Return exp) = do
   tv <- evalExp exp
   return $ Just tv
-evalStatement (FCallStatement name args) = do
-  e <- evalExp (FCall name args)
+evalStatement (FCallStatement fexp args) = do
+  evalExp (FCall fexp args)
   return Nothing
 evalStatement (If exp b1 b2) = do
   e <- evalExp exp

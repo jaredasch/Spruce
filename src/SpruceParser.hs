@@ -130,12 +130,12 @@ expP = orP
     equalityP = compP `P.chainl1` opsAtLevel (precLevel Eq)
     compP = sumP `P.chainl1` opsAtLevel (precLevel Lt)
     sumP = multP `P.chainl1` opsAtLevel (precLevel Add)
-    multP = indP `P.chainl1` opsAtLevel (precLevel Mult)
+    multP = fcallP `P.chainl1` opsAtLevel (precLevel Mult)
+    fcallP = expFCallP indP
     indP = arrIndP unaryP
     unaryP = baseP <|> UOp <$> uopP <*> unaryP
     baseP =
-      expFCallP
-        <|> expArrP
+      expArrP
         <|> inParensP expP
         <|> Val <$> valueP
         <|> Var <$> varNameP
@@ -155,12 +155,24 @@ arrIndP p = process <$> first <*> rest
     rest :: Parser [Exp]
     rest = many $ inBracketsP expP
 
-expFCallP :: Parser Exp
-expFCallP =
-  FCall
-    <$> (varNameP <* P.string "(")
-    <*> P.sepBy expP (trimP (P.string ","))
-    <* P.string ")"
+fArgsP :: Parser [Exp]
+fArgsP =
+  P.string "(" *> P.sepBy expP (trimP (P.string ",")) <* P.string ")"
+
+expFCallP :: Parser Exp -> Parser Exp
+expFCallP p = process <$> first <*> rest
+  where
+    process :: Exp -> [[Exp]] -> Exp
+    process = foldl comb
+
+    comb :: Exp -> [Exp] -> Exp
+    comb = FCall
+
+    first :: Parser Exp
+    first = p
+
+    rest :: Parser [[Exp]]
+    rest = many $ fArgsP
 
 expValP :: Parser Exp
 expValP = Val <$> valueP
@@ -235,12 +247,11 @@ ifP =
     <*> (trimP (P.string "else" *> trimP (inBracesP blockP)) <|> pure (Block []))
 
 fCallStatementP :: Parser Statement
-fCallStatementP =
-  FCallStatement
-    <$> (varNameP <* P.string "(")
-    <*> P.sepBy expP (trimP (P.string ","))
-    <* P.string ")"
-    <* trimP (P.string ";")
+fCallStatementP = trimP ((aux <$> (expFCallP expP)) <* P.string ";")
+  where
+    aux :: Exp -> Statement
+    aux (FCall f args) = FCallStatement f args
+    aux _ = undefined
 
 ----- Function Declaration Parsing -----
 fdeclP :: Parser FDecl
@@ -335,7 +346,7 @@ instance PP Exp where
       ppPrec _ e' = pp e'
       ppParens b = if b then PP.parens else id
   pp (UOp o e) = pp o <+> PP.parens (pp e)
-  pp (FCall name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args))
+  pp (FCall f args) = pp f <> PP.parens (joinBy PP.comma (map pp args))
     where
       joinBy :: Doc -> [Doc] -> Doc
       joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
@@ -361,7 +372,7 @@ instance PP Statement where
       PP.$$ PP.nest 4 (pp b2)
       PP.$$ PP.text "}"
   pp (Return e) = (PP.text "return" <+> pp e) <> PP.char ';'
-  pp (FCallStatement name args) = PP.text name <> PP.parens (joinBy PP.comma (map pp args)) <> PP.char ';'
+  pp (FCallStatement f args) = pp f <> PP.parens (joinBy PP.comma (map pp args)) <> PP.char ';'
     where
       joinBy :: Doc -> [Doc] -> Doc
       joinBy sep = foldr (\x acc -> if acc == PP.empty then x else x <> sep <> acc) PP.empty
@@ -447,7 +458,7 @@ genSizedExp n =
       ArrCons <$> QC.vectorOf 5 (genSizedExp (n `div` 2)),
       BOp <$> arbitrary <*> genSizedExp (n `div` 2) <*> genSizedExp (n `div` 2),
       UOp <$> arbitrary <*> genSizedExp (n `div` 2),
-      FCall <$> genString <*> QC.vectorOf 5 (genSizedExp (n `div` 2))
+      FCall <$> (Var <$> genString) <*> QC.vectorOf 5 (genSizedExp (n `div` 2))
     ]
 
 instance Arbitrary Exp where
@@ -477,7 +488,7 @@ genStatementMaxDepth n =
       Assign <$> arbitrary <*> arbitrary,
       If <$> genSizedExp 4 <*> genBlockMaxDepth (n - 1) <*> genBlockMaxDepth (n - 1),
       Return <$> arbitrary,
-      FCallStatement <$> genString <*> QC.vectorOf 4 (genSizedExp 2),
+      FCallStatement <$> (Var <$> genString) <*> QC.vectorOf 4 (genSizedExp 2),
       While <$> genSizedExp 4 <*> genBlockMaxDepth (n - 1),
       ForIn <$> arbitrary <*> genSizedExp 4 <*> genBlockMaxDepth (n - 1),
       Atomic <$> genBlockMaxDepth (n - 1)

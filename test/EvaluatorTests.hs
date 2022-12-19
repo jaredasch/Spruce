@@ -79,5 +79,6 @@ evalTestSuite =
       "test/demo/09_firstclassfuncs.spr" $=$ int 2,
       "test/demo/10_scoping_complex.spr" $=$ int 165,
       "test/demo/11_closures.spr" $=$ int 3,
-      "test/demo/12_closures_array.spr" $=$ int 2
+      "test/demo/12_closures_array.spr" $=$ int 2,
+      "test/demo/13_closures_array_inline.spr" $=$ int 2
     ]

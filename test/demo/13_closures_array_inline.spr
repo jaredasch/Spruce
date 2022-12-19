@@ -1,0 +1,15 @@
+func makeCounter () -> function {
+    let i : int = 0;
+    let count : function = func () -> int {
+        i = i + 1;
+        return i;
+    };
+    return count;
+}
+
+let x : [function] = [makeCounter(), makeCounter()];
+x[0]();
+x[1]();
+x[0]();
+x[0]();
+return x[1]();
