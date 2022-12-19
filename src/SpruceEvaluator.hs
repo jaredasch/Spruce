@@ -124,7 +124,6 @@ closureAddLVal (Typed (FunctionClosure vdecls retTy body env _) t) loc =
 closureAddLVal (Typed (ArrayVal vals) (ArrayT t)) loc =
   let typeAnnotatedVals = map (\x -> x `as` t) vals
       indexAnnotatedVals = zip [0 ..] typeAnnotatedVals
-      -- error "hey"
       closureAnnotatedVals = map (\(i, tv) -> closureAddLVal tv (LArrInd loc (Val (IntVal i)))) indexAnnotatedVals
    in ArrayVal (map (\(Typed v t) -> v) closureAnnotatedVals) `as` (ArrayT t)
 closureAddLVal tv _ = tv
