@@ -1,6 +1,5 @@
-module BQLParser where
+module SpruceParser where
 
-import BQLTypes
 import Control.Applicative
 import Control.Monad (void)
 import Data.Functor (($>))
@@ -8,6 +7,7 @@ import Data.List (intercalate)
 import Data.Maybe as Maybe
 import ParseLib (Parser)
 import ParseLib qualified as P
+import SpruceTypes
 import Test.QuickCheck (Arbitrary (..), Gen)
 import Test.QuickCheck qualified as QC
 import Text.PrettyPrint (Doc, (<+>))

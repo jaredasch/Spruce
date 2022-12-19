@@ -1,13 +1,5 @@
-module BQLEvaluator where
+module SpruceEvaluator where
 
-import BQLParser
-  ( PP (..),
-    blockP,
-    expP,
-    programP,
-    statementP,
-  )
-import BQLTypes
 import Control.Applicative
 import Control.Concurrent (ThreadId, forkIO, threadDelay)
 import Control.Concurrent.Async (Async (..), async, wait)
@@ -58,6 +50,14 @@ import Data.Maybe (isJust, isNothing)
 import Data.Maybe qualified as Maybe
 import ParseLib (Parser (doParse))
 import ParseLib qualified as P
+import SpruceParser
+  ( PP (..),
+    blockP,
+    expP,
+    programP,
+    statementP,
+  )
+import SpruceTypes
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
 import Text.PrettyPrint (Doc, (<+>))

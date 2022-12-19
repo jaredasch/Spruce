@@ -1,4 +1,4 @@
-module BQLTypes where
+module SpruceTypes where
 
 import Control.Concurrent.Async (Async)
 import Control.Concurrent.STM (STM, TVar)

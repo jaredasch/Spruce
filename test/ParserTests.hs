@@ -1,8 +1,8 @@
 module ParserTests where
 
-import BQLParser qualified as BP
-import BQLTypes qualified as BT
 import ParseLib qualified as P
+import SpruceParser qualified as BP
+import SpruceTypes qualified as BT
 import Test.QuickCheck as QC
 import Text.PrettyPrint (Doc, (<+>))
 import Text.PrettyPrint qualified as PP

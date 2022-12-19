@@ -1,9 +1,9 @@
 module EvaluatorTests where
 
-import BQLEvaluator (as)
-import BQLEvaluator qualified as BE
-import BQLParser qualified as BP
-import BQLTypes (BType (..), TypedVal, Value (..))
+import SpruceEvaluator (as)
+import SpruceEvaluator qualified as BE
+import SpruceParser qualified as BP
+import SpruceTypes (BType (..), TypedVal, Value (..))
 import Test.HUnit (Assertion, Test (TestCase, TestList), assertFailure, runTestTT, (~:), (~?=))
 import Text.PrettyPrint (render, text)
 

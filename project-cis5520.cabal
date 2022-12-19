@@ -90,9 +90,9 @@ library
       common-stanza
   exposed-modules:
       ParseLib
-      BQLParser
-      BQLEvaluator
-      BQLTypes
+      SpruceParser
+      SpruceEvaluator
+      SpruceTypes
   hs-source-dirs:
       src
   default-language: Haskell2010

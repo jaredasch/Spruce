@@ -1,9 +1,9 @@
 module Main where
 
-import BQLEvaluator (evalProgramFile)
-import BQLParser
 import GHC.IO.Handle (hFlush)
 import ParseLib
+import SpruceEvaluator (evalProgramFile)
+import SpruceParser
 import System.IO
 
 main :: IO ()
