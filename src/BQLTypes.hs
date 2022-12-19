@@ -22,7 +22,7 @@ data BType
 
 -- | The first argument contains all function declarations, the second is the main
 -- code to be executed
-data Query = Query [FDecl] Block deriving (Show, Eq)
+data Program = Program [FDecl] Block deriving (Show, Eq)
 
 data FDecl = FDecl String [VarDecl] BType Block deriving (Show, Eq)
 

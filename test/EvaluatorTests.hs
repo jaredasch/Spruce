@@ -51,7 +51,7 @@ fileTestErrorMsg tname expected actual =
 
 assertFileResultEq :: String -> Either String (Maybe TypedVal) -> Assertion
 assertFileResultEq fname expected = do
-  actual <- BE.evalQueryFile fname
+  actual <- BE.evalProgramFile fname
   if actual == expected
     then return ()
     else assertFailure $ fileTestErrorMsg fname expected actual

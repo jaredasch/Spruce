@@ -4,7 +4,7 @@ import BQLParser
   ( PP (..),
     blockP,
     expP,
-    queryP,
+    programP,
     statementP,
   )
 import BQLTypes
@@ -759,8 +759,8 @@ evalBlock (Block (h : t)) = do
     Nothing -> evalBlock (Block t)
     _ -> return res
 
-evalQuery :: (MonadError String m, MonadState Store m, MonadIO m) => Query -> m (Maybe TypedVal)
-evalQuery (Query fdecls main) = do
+evalProgram :: (MonadError String m, MonadState Store m, MonadIO m) => Program -> m (Maybe TypedVal)
+evalProgram (Program fdecls main) = do
   let initBindings = Map.fromList (map aux fdecls)
       initScopedVars = ScopedS {bindings = initBindings, parent = Nothing}
       initStore = emptyStore {vars = initScopedVars}
@@ -883,11 +883,11 @@ libPrint args = do
       return $ IntVal 0 `as` VoidT
     _ -> throwError "Can't print array types"
 
-evalQueryFile :: String -> IO (Either String (Maybe TypedVal))
-evalQueryFile fname = do
-  parseResM <- P.parseFromFile queryP fname
+evalProgramFile :: String -> IO (Either String (Maybe TypedVal))
+evalProgramFile fname = do
+  parseResM <- P.parseFromFile programP fname
   case parseResM of
     Left parseErr -> return $ Left parseErr
-    Right parsedQuery -> do
-      (value, finalStore) <- runStateT (runExceptT (evalQuery parsedQuery)) emptyStore
+    Right parsedProgram -> do
+      (value, finalStore) <- runStateT (runExceptT (evalProgram parsedProgram)) emptyStore
       return value

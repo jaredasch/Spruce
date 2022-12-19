@@ -106,13 +106,3 @@ in https://www.stackage.org/lts-19.19 by adding an entry to the
 `build-depends` list of the `common-stanza` in the cabal file. If you want to
 use a library that is not on stackage, you'll need to update the common-stanza
 *and* add information to `stack.yaml` about where to find that library.
-
-## BQL Specification
-A query for BixDB is written in BixDB Query Language (BQL). A BQL query consists of function declarations and a main block that is executed. Any statements that are not in a function declaration are assumed to be in the main block, and will be executed in the order specified in the query, even if divided by a function declaration. The AST is described as follows:
-
-```
-Query := [TopLevelStatement]
-TopLevelStatement := FDecl | Statement
-
-TODO
-```

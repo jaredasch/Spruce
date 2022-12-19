@@ -251,19 +251,19 @@ fdeclP =
     <*> trimP (trimP (P.string "->") *> typeP)
     <*> trimP (inBracesP blockP)
 
------ Query Parser -----
+----- Program Parser -----
 data TopLevelStatement = S Statement | F FDecl
 
-queryP :: Parser Query
-queryP = queryCons <$> many ((F <$> fdeclP) <|> (S <$> statementP)) <* P.eof
+programP :: Parser Program
+programP = programCons <$> many ((F <$> fdeclP) <|> (S <$> statementP)) <* P.eof
   where
-    queryCons :: [TopLevelStatement] -> Query
-    queryCons = foldr aux (Query [] (Block []))
+    programCons :: [TopLevelStatement] -> Program
+    programCons = foldr aux (Program [] (Block []))
 
-    aux :: TopLevelStatement -> Query -> Query
-    aux s (Query fdecls (Block main)) = case s of
-      F f -> Query (f : fdecls) (Block main)
-      S s -> Query fdecls (Block (s : main))
+    aux :: TopLevelStatement -> Program -> Program
+    aux s (Program fdecls (Block main)) = case s of
+      F f -> Program (f : fdecls) (Block main)
+      S s -> Program fdecls (Block (s : main))
 
 ----- Pretty Printing -----
 class PP a where
@@ -378,8 +378,8 @@ instance PP FDecl where
 instance PP Block where
   pp (Block stmts) = PP.vcat (map pp stmts)
 
-instance PP Query where
-  pp (Query fdecls main) = PP.vcat (map pp fdecls) PP.$$ pp main
+instance PP Program where
+  pp (Program fdecls main) = PP.vcat (map pp fdecls) PP.$$ pp main
 
 ----- Arbitrary Declarations -----
 instance Arbitrary Bop where
