@@ -79,6 +79,7 @@ evalTestSuite =
       "test/demo/05_forkwait.spr" $=$ int 499500,
       "test/demo/07_atomic.spr" $=$ int 6000,
       "test/demo/09_firstclassfuncs.spr" $=$ int 2,
-      "test/demo/10_closures.spr" $=$ int 3,
-      "test/demo/11_closures_array_inline.spr" $=$ int 2
+      "test/demo/10_inline_func.spr" $=$ int 5,
+      "test/demo/11_closures.spr" $=$ int 3,
+      "test/demo/12_closures_array_inline.spr" $=$ int 2
     ]

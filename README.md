@@ -17,7 +17,7 @@ Statement :=
   | if (<Expression>) { <Block> } 
   | if (<Expression>) { <Block> } else { <Block> }
   | return <Expression>;
-  | <VarName>(<FunctionArgs>);
+  | <Expression>(<FunctionArgs>);
   | while (<Expression>) { <Block> }
   | for (<VarDecl> in <Expression>) { <Block> }
   | atomic { <Block> }
@@ -36,7 +36,7 @@ Expression :=
   | <Expression>[<Expression>]
   | <Expression> <BinaryOperand> <Expression>
   | <UnaryOperand> <Expression>
-  | <VarName>(<FunctionArgs>)
+  | <Expression>(<FunctionArgs>)
 
 VarType := 
   | function
