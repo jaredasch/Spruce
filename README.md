@@ -1,4 +1,4 @@
-# Spruce - A Functional Language with Transactional Memory, by Jared Asch (jasch16) & Rohan Gupta (grohan)
+# Spruce - Jared Asch (jasch16) & Rohan Gupta (grohan)
 Our project is Spruce, a functional lanuguage designed with concurrency support as a primary goal. Users can specify blocks of code that are guaranteed to run atomically, fork new procceses, and wait on existing ones, giving developers fine-grained control over their program's behavior. Functions are treated as first-class values, and the language supports lexically-scoped closures. 
 
 ## Language Syntax
