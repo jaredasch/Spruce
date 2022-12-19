@@ -77,7 +77,7 @@ initScope :: ScopedStore
 initScope = ScopedS {bindings = Map.empty, parent = Nothing}
 
 emptyStore :: Store
-emptyStore = St {vars = initScope, fdecls = Map.empty, shared = Map.empty, threads = []}
+emptyStore = St {vars = initScope, shared = Map.empty, threads = []}
 
 popLocalScope :: (MonadState Store m, MonadIO m) => m ()
 popLocalScope = do
@@ -583,7 +583,9 @@ execUserFunc (Typed (FunctionClosure argDecls expectedRetType body env locM) t) 
   let restoredVars = appendToGlobalScope newGlobalScope localScopes
   put store {vars = restoredVars}
   case (ret, expectedRetType) of
-    (Just x@(Typed retVal retTy), _) -> return x
+    (Just x@(Typed retVal retTy), _) -> do
+      typeGuard retTy expectedRetType "Return type for function doesn't match return value"
+      return x
     (Nothing, VoidT) -> return (IntVal 0 `as` VoidT)
     (_, _) -> throwError "Return type for function doesn't match return value"
   where
@@ -864,6 +866,7 @@ libFork args = do
   let typedFVal@(Typed v1 t1) = args !! 0
   case (t1, v1) of
     (FuncT _ _, FunctionClosure vdecls retTy block _ _) -> do
+      typeGuard retTy VoidT "Can only fork functions with void return type"
       allVars <- get
       async <- liftIO $ async (execIO typedFVal allVars)
       let threads' = async : threads allVars

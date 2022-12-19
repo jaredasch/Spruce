@@ -15,6 +15,6 @@ main = do
       result <- evalProgramFile fname
       case result of
         Left err -> putStrLn err
-        Right (Just returnVal) -> print returnVal
+        Right (Just returnVal) -> print (pp returnVal)
         Right Nothing -> putStrLn "Success: no return value"
       main

@@ -103,9 +103,6 @@ type VarStore = Map String TypedVal
 -- Map type for transactional variables
 type TVarStore = Map String (TVar TypedVal)
 
--- Function table to store user-defined functions
-type FunctionTable = Map String FDecl
-
 data Scope = Global | Local deriving (Show)
 
 -- Data type for storing typed values
@@ -114,7 +111,6 @@ data TypedVal = Typed Value BType deriving (Show, Eq)
 data Store = St
   { vars :: ScopedStore,
     shared :: TVarStore,
-    fdecls :: FunctionTable,
     threads :: [Async ()]
   }
 
