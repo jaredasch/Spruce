@@ -66,8 +66,13 @@ When called from within a function, `return` acts as it does in most other langa
 
 Atomic blocks are used to guaranee transactional behavior. All code executed within an atomic block is guaranteed to be executed together, avoiding potential race conditions. However, because of the additional overheads required to ensure atomicity, users are more limited within atomic blocks -- functions cannot be called.
 
+### Supported Operands
+The following binary operands are supported, in order of highest to lowest precendence: array indexing with `[]`, multiplication and division, addition (`+`) and subtraction (`-`), comparison (`<, >, <=, >=`), equality checking (`!=, ==`), logical and (`and`), logical or (`or`).
+
+The only supported unary operands are numerical negation (`-`) and boolean not (`!`).
+
 ### Native Functions
-To provide certain functionality, Spruce contains native functions that have implementations in Haskell and not in Spruce.
+To provide certain required functionality, Spruce contains native functions that have implementations in Haskell and not in Spruce.
 
 | Function     | Description |
 | ----------- | ----------- |
@@ -83,21 +88,15 @@ To provide certain functionality, Spruce contains native functions that have imp
 ## Module organization
 
 Haskell packages typically divide their source code into three separate places:
-  - The bulk of your code should be developed as a reusable library in 
-    modules in the `src` directory. We've created [Lib.hs](src/Lib.hs) 
-    for you to get started. You can add additional modules here.
+  - Our library code is split into 4 main files. `ParseLib.hs` contains utility functions for applicative parsing, and is mostly borrowed from the HW5 file `Parser.hs`. `SpruceTypes.hs` contains common datatypes used in both our parser and interpreter, factored out to avoid circular dependendies between the two. `SpruceParser.hs` contains all logic for parsing Spruce programs to create abtract syntax tree. Finally, `SpruceEvaluator.hs` contains the logic for interpreting Spruce programs
   
-  - The entry point for your executable is in [Main.hs](app/Main.hs). 
+  - We provide a very basic CLI to interact with Spruce, which is accessible by `stack run`. It will prompt the user and run the provided Spruce file, outputting the result. Inputting `:q` will quit the CLI.
   
-  - All of your test cases should be in [the test directory](test/Spec.hs).
+  - Our test cases are broken down into parsing tests and evaluation tests. Parsing tests use the pretty print library to ensure that for arbitrary Spruce programs, pretty-printing and then parsing results in the intial program. This round-trip testing is done with QuickCheck for values, expressions, and statements. One area for improvement is including first-class functions in our QuickCheck, but we encountered issues with generating arbitrary function values.
 
 ## Building, running, and testing
 
-This project compiles with `stack build`. 
-You can run the main executable with `stack run`.
-You can run the tests with `stack test`. 
-
-Finally, you can start a REPL with `stack ghci`.
+This project compiles with `stack build`. You can run the CLI with `stack run`. You can run the tests with `stack test`. Finally, you can start a REPL with `stack ghci`.
 
 ## Importing additional libraries
 
