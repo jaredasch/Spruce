@@ -62,14 +62,16 @@ fname $=$ expected = TestCase (assertFileResultEq fname expected)
 evalTestSuite :: Test
 evalTestSuite =
   TestList
-    [ "test/queries/foreach.spr" $=$ int 55,
-      "test/queries/global_local_naming_correct.spr" $=$ int 2,
-      "test/queries/badly_typed_arr.spr" $=$ evalError "Type mismatch in array",
-      "test/queries/global_local_naming_conflict.spr" $=$ evalError "Error: redeclaring variable",
-      "test/queries/nested_if.spr" $=$ int (-1),
-      "test/queries/bad_scoping.spr" $=$ evalError "Use of undeclared variable i",
-      "test/queries/fib.spr" $=$ returnVal (ArrayVal (IntVal <$> [10946, 17711, 28657]) `as` ArrayT IntT),
-      "test/queries/memoized_fib.spr" $=$ returnVal (ArrayVal (IntVal <$> [10946, 17711, 28657]) `as` ArrayT IntT),
+    [ "test/programs/foreach.spr" $=$ int 55,
+      "test/programs/global_local_naming_correct.spr" $=$ int 2,
+      "test/programs/badly_typed_arr.spr" $=$ evalError "Type mismatch in array",
+      "test/programs/global_local_naming_conflict.spr" $=$ evalError "Error: redeclaring variable",
+      "test/programs/nested_if.spr" $=$ int (-1),
+      "test/programs/bad_scoping.spr" $=$ evalError "Use of undeclared variable i",
+      "test/programs/fib.spr" $=$ returnVal (ArrayVal (IntVal <$> [10946, 17711, 28657]) `as` ArrayT IntT),
+      "test/programs/memoized_fib.spr" $=$ returnVal (ArrayVal (IntVal <$> [10946, 17711, 28657]) `as` ArrayT IntT),
+      "test/programs/scoping_complex.spr" $=$ int 165,
+      "test/programs/closures_array.spr" $=$ int 2,
       "test/demo/01_types.spr" $=$ int 55,
       "test/demo/02_arrays.spr" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
       "test/demo/03_functions.spr" $=$ returnVal (ArrayVal (IntVal <$> [0, 1, 3, 6, 10]) `as` ArrayT IntT),
@@ -77,8 +79,6 @@ evalTestSuite =
       "test/demo/05_forkwait.spr" $=$ int 499500,
       "test/demo/07_atomic.spr" $=$ int 6000,
       "test/demo/09_firstclassfuncs.spr" $=$ int 2,
-      "test/demo/10_scoping_complex.spr" $=$ int 165,
-      "test/demo/11_closures.spr" $=$ int 3,
-      "test/demo/12_closures_array.spr" $=$ int 2,
-      "test/demo/13_closures_array_inline.spr" $=$ int 2
+      "test/demo/10_closures.spr" $=$ int 3,
+      "test/demo/11_closures_array_inline.spr" $=$ int 2
     ]
