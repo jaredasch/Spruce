@@ -84,6 +84,24 @@ To provide certain required functionality, Spruce contains native functions that
 | `wait(thread: string) -> void` | Performs a blocking wait on the thread identified by `thread` |
 | `print(val: any) -> void` | Prints `val`, exists for all primtitive types | 
 
+### Concurrency
+
+One of our goals with Spruce was to provide access to low-level concurrency APIs while still maintaining a familiar, easy-to use structure. To that end, our concurrency primitives `fork` and `wait` extend a simple user-facing API with the following functionality:
+
+ - `fork` takes in a function with a void return type, forks a new thread and executes the function in a separate thread (using the Haskell async library). The return value of fork is a `string` providing a handle to the thread.
+ - `wait` takes in a string pointing to a thread handle and performs a blocking wait on the thread.
+ 
+Of course, concurrency primitives are of little practical purpose without shared state. We use the STM library in haskell to create shared, mutable variables that multiple threads can access. These are created using the `shared` keyword prefxing the variable name.
+
+Shared memory introduces problems of consistency and atomicity. Our language model anticipates this and provides `atomic {}` blocks which guarantee that shared state read and written to within are executed in a *transaction*, with inbuilt rollback and retry mechanisms. This enables Spruce programmers to 
+enhance the safety of their code and be robust against race conditions and related pitfalls.
+
+Although acting as a boon for concurrent programs, our `atomic {}` block presents its own restrictions. Due to the Monad transformer stack used to implement it, we have restrictions in place on code that can be executed within the block:
+
+- Function calls are not supported within `atomic` blocks. This is because function calls could potentially cause IO operations, which we do not support in the presence of the STM monad.
+- You cannot have nested `atomic` blocks. It does not make sense to have layered transactions, anyways.
+
+Our hope with introducing native concurrency APIs within our language was to allow powerful, expressive function design to interface with thread-safe, shared state to create a language ready for a parallel programming environment.
 
 ## Module organization
 
