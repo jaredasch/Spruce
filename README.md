@@ -60,8 +60,6 @@ A `let` statement must be used the first time a variable is declared. This tells
 
 `for` statements allow for developers to iterate over arrays. The first variable declaration tells the language what variable to bind each element of the array to. If the provided expression is not an array type, Spruce will throw an error at runtime.
 
-TODO: Function calls
-
 When called from within a function, `return` acts as it does in most other langauges. When it is called from the top-level scope, this indicates to Spruce that the program should return that expression as the final output of the program.
 
 Atomic blocks are used to guaranee transactional behavior. All code executed within an atomic block is guaranteed to be executed together, avoiding potential race conditions. However, because of the additional overheads required to ensure atomicity, users are more limited within atomic blocks -- functions cannot be called.

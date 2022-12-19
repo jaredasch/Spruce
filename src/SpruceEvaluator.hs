@@ -801,7 +801,7 @@ libFuncLookup "wait" = Just libWait
 libFuncLookup "print" = Just libPrint
 libFuncLookup x = Nothing
 
--- | Ensure that types of TypedVals aligns with given types 
+-- | Ensure that types of TypedVals aligns with given types
 guardTypes :: (MonadError String m, MonadState Store m, MonadIO m) => [TypedVal] -> [BType] -> String -> m ()
 guardTypes [] [] fname = do return ()
 guardTypes ((Typed v t) : valT) (tyH : tyT) fname = do
