@@ -862,7 +862,6 @@ execIO fval store =
 
 libFork :: (MonadError String m, MonadState Store m, MonadIO m) => [TypedVal] -> m TypedVal
 libFork args = do
-  -- TODO : Type guards
   let typedFVal@(Typed v1 t1) = args !! 0
   case (t1, v1) of
     (FuncT _ _, FunctionClosure vdecls retTy block _ _) -> do
